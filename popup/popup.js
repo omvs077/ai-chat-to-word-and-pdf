@@ -1,4 +1,4 @@
-(function () {
+﻿(function () {
   const badge = document.getElementById('platformBadge');
   const exportBtn = document.getElementById('exportBtn');
   const statusLine = document.getElementById('statusLine');
@@ -90,7 +90,13 @@
       }
 
       const turndown = new TurndownService({ headingStyle: 'atx', codeBlockStyle: 'fenced' });
-      result.turns.forEach(t => { t.markdown = turndown.turndown(t.html || ''); });
+      result.turns.forEach(t => {
+        let md = turndown.turndown(t.html || '');
+        if (t.artifacts && t.artifacts.length) {
+          md += t.artifacts.map(a => `\n\n📎 **Artifact:** ${a.title} — open this conversation in Claude to view/edit it.`).join('');
+        }
+        t.markdown = md;
+      });
 
       setStep('extract', 'is-done');
       fillRailsUpTo('compile');

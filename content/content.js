@@ -1,15 +1,12 @@
-// Injected on-demand (via chrome.scripting.executeScript) only when the user
+﻿// Injected on-demand (via chrome.scripting.executeScript) only when the user
 // clicks "Export chat" in the popup. Never runs passively or on page load.
 // Returns a JSON Intermediate Representation of the conversation; the last
-// expression's value becomes the executeScript() result.
+// expression's value (a Promise, since this is async) becomes the
+// executeScript() result — chrome.scripting awaits it automatically.
 
-(function extractClaudeChat() {
+(async function extractClaudeChat() {
   const USER_SELECTORS = ['[data-testid="user-message"]'];
-  const ASSISTANT_SELECTORS = [
-    '[data-testid="assistant-message"]',
-    '.font-claude-message',
-    '[data-testid="chat-message"] .prose'
-  ];
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
 
   function firstMatching(selectors) {
     for (const sel of selectors) {
@@ -24,15 +21,57 @@
     return nodes.filter((n, i) => !nodes.some((m, j) => i !== j && n.contains(m)));
   }
 
-  const userNodes = dropAncestors(firstMatching(USER_SELECTORS)).map(el => ({ role: 'user', el }));
-  const assistantNodes = dropAncestors(firstMatching(ASSISTANT_SELECTORS)).map(el => ({ role: 'assistant', el }));
+  // --- Step 1: scroll the conversation to the top to force-load older,
+  // virtualized/unloaded messages before we read the DOM. ---
+  function findScrollContainer(fromEl) {
+    let el = fromEl;
+    while (el && el !== document.body) {
+      if (el.scrollHeight > el.clientHeight + 40) return el;
+      el = el.parentElement;
+    }
+    return document.scrollingElement || document.documentElement;
+  }
 
-  const turns = userNodes.concat(assistantNodes).sort((a, b) => {
-    const pos = a.el.compareDocumentPosition(b.el);
-    if (pos & Node.DOCUMENT_POSITION_FOLLOWING) return -1;
-    if (pos & Node.DOCUMENT_POSITION_PRECEDING) return 1;
-    return 0;
-  });
+  async function loadFullHistory() {
+    const anchor = document.querySelector(USER_SELECTORS[0]);
+    if (!anchor) return; // nothing rendered yet — extraction below will report NO_MESSAGES_FOUND
+    const container = findScrollContainer(anchor);
+    let lastHeight = -1, stable = 0, iterations = 0;
+    while (stable < 3 && iterations < 60) {
+      container.scrollTop = 0;
+      await sleep(350);
+      const h = container.scrollHeight;
+      stable = h === lastHeight ? stable + 1 : 0;
+      lastHeight = h;
+      iterations++;
+    }
+  }
+
+  await loadFullHistory();
+
+  // --- Step 2: locate turns. We only rely on a stable selector for USER
+  // messages, then infer the assistant turns from DOM structure — this
+  // survives Claude renaming its assistant-message classes/testids, which
+  // change more often than the input's data-testid does. ---
+  const userNodes = dropAncestors(firstMatching(USER_SELECTORS));
+
+  function findTurnElements(userNodes) {
+    if (!userNodes.length) return [];
+    let el = userNodes[0];
+    while (el.parentElement && el.parentElement.children.length === 1) el = el.parentElement;
+    const list = el.parentElement;
+    if (!list) return userNodes.map(u => ({ role: 'user', el: u }));
+
+    const turnEls = Array.from(list.children).filter(c => c.textContent && c.textContent.trim().length > 0);
+    const containsAllUsers = userNodes.every(u => turnEls.some(t => t.contains(u)));
+    if (turnEls.length <= userNodes.length || !containsAllUsers) {
+      // Heuristic didn't find a sensible turn-list level — fall back to user-only.
+      return userNodes.map(u => ({ role: 'user', el: u }));
+    }
+    return turnEls.map(t => ({ role: userNodes.some(u => t.contains(u)) ? 'user' : 'assistant', el: t }));
+  }
+
+  const turns = findTurnElements(userNodes);
 
   if (!turns.length) {
     return { error: 'NO_MESSAGES_FOUND' };
@@ -42,26 +81,48 @@
     return Array.from(el.querySelectorAll('pre')).map(pre => {
       const codeEl = pre.querySelector('code');
       const langMatch = codeEl && codeEl.className.match(/language-(\S+)/);
-      // Claude's UI often shows a small language label above the code block.
       const labelEl = pre.previousElementSibling;
       const label = langMatch ? langMatch[1] : (labelEl && labelEl.textContent.trim().length < 20 ? labelEl.textContent.trim() : '');
       return { language: label || 'text', code: (codeEl || pre).innerText.replace(/\n$/, '') };
     });
   }
 
+  // Best-effort: inline images (excluding small icons/avatars).
+  function extractImages(el) {
+    return Array.from(el.querySelectorAll('img')).filter(img => {
+      const w = img.naturalWidth || img.width || 0;
+      const h = img.naturalHeight || img.height || 0;
+      return (w === 0 && h === 0) || (w > 48 && h > 48); // unresolved lazy imgs pass through too
+    }).map(img => ({ src: img.currentSrc || img.src, alt: img.alt || 'image' }));
+  }
+
+  // Best-effort: Claude "artifact" preview cards. These usually open a side
+  // panel via JS rather than a real link, so we can only capture a label —
+  // if this misses real artifacts on your account, tell me what
+  // `document.querySelector('[data-testid*="artifact"]')` looks like and
+  // I'll refine the selector.
+  function extractArtifacts(el) {
+    return Array.from(el.querySelectorAll('[data-testid*="artifact" i]'))
+      .filter(node => !node.querySelector('[data-testid*="artifact" i]')) // innermost only
+      .map(node => ({ title: node.textContent.trim().slice(0, 120) || 'Untitled artifact' }));
+  }
+
   const result = {
     title: document.title.replace(/\s*[-|]\s*Claude\s*$/i, '').trim() || 'Claude Conversation',
     url: location.href,
     exportedAt: new Date().toISOString(),
-    turns: turns.map(({ role, el }) => ({
-      role,
-      codeBlocks: extractCodeBlocks(el)
-    }))
+    turns: turns.map(({ role, el }) => {
+      const clone = el.cloneNode(true);
+      clone.querySelectorAll('[data-testid*="artifact" i]').forEach(n => n.remove());
+      return {
+        role,
+        html: clone.innerHTML,
+        codeBlocks: extractCodeBlocks(el),
+        images: extractImages(el),
+        artifacts: extractArtifacts(el)
+      };
+    })
   };
-
-  // Markdown conversion happens in the popup (Turndown is loaded there), so we
-  // hand back innerHTML per turn instead of raw text — preserves lists/headers/code.
-  result.turns.forEach((t, i) => { t.html = turns[i].el.innerHTML; });
 
   return result;
 })();
