@@ -1,0 +1,21 @@
+# OS
+.DS_Store
+Thumbs.db
+
+# Editors
+.vscode/
+.idea/
+*.swp
+
+# Node (only relevant if you re-fetch/rebuild vendor libs locally)
+node_modules/
+npm-debug.log*
+*.tgz
+
+# Packed extension artifacts
+*.zip
+*.crx
+*.pem
+
+# Local env
+.env
