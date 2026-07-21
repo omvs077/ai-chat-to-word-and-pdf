@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<title>Ai chat to word & pdf</title>
+<link rel="stylesheet" href="popup.css" />
+</head>
+<body>
+  <div class="app">
+    <header class="app__header">
+      <div class="app__title">
+        <span class="app__mark" aria-hidden="true"></span>
+        <h1>Ai chat to word &amp; pdf</h1>
+      </div>
+      <span id="platformBadge" class="badge badge--off">not on claude.ai</span>
+    </header>
+
+    <section class="panel">
+      <div class="field">
+        <span class="field__label">Format</span>
+        <div class="segmented" role="radiogroup" aria-label="Export format">
+          <button type="button" class="segmented__option is-selected" data-format="docx" role="radio" aria-checked="true">.docx</button>
+          <button type="button" class="segmented__option" data-format="pdf" role="radio" aria-checked="false">.pdf</button>
+        </div>
+      </div>
+
+      <button id="exportBtn" class="export-btn" disabled>
+        <span class="export-btn__label">Export chat</span>
+      </button>
+
+      <div id="pipeline" class="pipeline" hidden>
+        <div class="pipeline__step" data-step="extract">
+          <span class="pipeline__dot"></span><span class="pipeline__text">Extract</span>
+        </div>
+        <div class="pipeline__rail"><div class="pipeline__fill"></div></div>
+        <div class="pipeline__step" data-step="compile">
+          <span class="pipeline__dot"></span><span class="pipeline__text">Compile</span>
+        </div>
+        <div class="pipeline__rail"><div class="pipeline__fill"></div></div>
+        <div class="pipeline__step" data-step="save">
+          <span class="pipeline__dot"></span><span class="pipeline__text">Save</span>
+        </div>
+      </div>
+
+      <p id="statusLine" class="status" aria-live="polite">Open a Claude chat, then click Export.</p>
+    </section>
+
+    <footer class="app__footer">
+      Runs entirely on your device — no data ever leaves your browser.
+    </footer>
+  </div>
+
+  <script src="../lib/vendor/turndown.umd.js"></script>
+  <script src="../lib/vendor/docx.umd.js"></script>
+  <script src="../lib/vendor/jspdf.umd.min.js"></script>
+  <script src="../lib/docx-generator.js"></script>
+  <script src="../lib/pdf-generator.js"></script>
+  <script src="popup.js"></script>
+</body>
+</html>
