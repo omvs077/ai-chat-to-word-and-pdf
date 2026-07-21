@@ -6,6 +6,8 @@
 
 (async function extractClaudeChat() {
   const USER_SELECTORS = ['[data-testid="user-message"]'];
+  const ASSISTANT_SELECTORS = ['.font-claude-response'];
+  const STRIP_SELECTORS = ['[data-message-action-bar]', '[data-find-omitted]'];
   const sleep = ms => new Promise(r => setTimeout(r, ms));
 
   function firstMatching(selectors) {
@@ -19,6 +21,13 @@
   // Drop nodes that are ancestors of another matched node (keeps innermost match).
   function dropAncestors(nodes) {
     return nodes.filter((n, i) => !nodes.some((m, j) => i !== j && n.contains(m)));
+  }
+
+  function byDomOrder(a, b) {
+    const pos = a.el.compareDocumentPosition(b.el);
+    if (pos & Node.DOCUMENT_POSITION_FOLLOWING) return -1;
+    if (pos & Node.DOCUMENT_POSITION_PRECEDING) return 1;
+    return 0;
   }
 
   // --- Step 1: scroll the conversation to the top to force-load older,
@@ -49,13 +58,14 @@
 
   await loadFullHistory();
 
-  // --- Step 2: locate turns. We only rely on a stable selector for USER
-  // messages, then infer the assistant turns from DOM structure — this
-  // survives Claude renaming its assistant-message classes/testids, which
-  // change more often than the input's data-testid does. ---
+  // --- Step 2: locate turns. Primary path uses the confirmed selectors for
+  // each role. If Claude ever renames the assistant class again, fall back
+  // to inferring turns from DOM structure around the (more stable) user
+  // message testid, rather than failing outright. ---
   const userNodes = dropAncestors(firstMatching(USER_SELECTORS));
+  const assistantNodes = dropAncestors(firstMatching(ASSISTANT_SELECTORS));
 
-  function findTurnElements(userNodes) {
+  function turnsFromStructure(userNodes) {
     if (!userNodes.length) return [];
     let el = userNodes[0];
     while (el.parentElement && el.parentElement.children.length === 1) el = el.parentElement;
@@ -65,13 +75,14 @@
     const turnEls = Array.from(list.children).filter(c => c.textContent && c.textContent.trim().length > 0);
     const containsAllUsers = userNodes.every(u => turnEls.some(t => t.contains(u)));
     if (turnEls.length <= userNodes.length || !containsAllUsers) {
-      // Heuristic didn't find a sensible turn-list level — fall back to user-only.
       return userNodes.map(u => ({ role: 'user', el: u }));
     }
     return turnEls.map(t => ({ role: userNodes.some(u => t.contains(u)) ? 'user' : 'assistant', el: t }));
   }
 
-  const turns = findTurnElements(userNodes);
+  const turns = assistantNodes.length
+    ? userNodes.map(el => ({ role: 'user', el })).concat(assistantNodes.map(el => ({ role: 'assistant', el }))).sort(byDomOrder)
+    : turnsFromStructure(userNodes);
 
   if (!turns.length) {
     return { error: 'NO_MESSAGES_FOUND' };
@@ -113,7 +124,9 @@
     exportedAt: new Date().toISOString(),
     turns: turns.map(({ role, el }) => {
       const clone = el.cloneNode(true);
-      clone.querySelectorAll('[data-testid*="artifact" i]').forEach(n => n.remove());
+      STRIP_SELECTORS.concat('[data-testid*="artifact" i]').forEach(sel => {
+        clone.querySelectorAll(sel).forEach(n => n.remove());
+      });
       return {
         role,
         html: clone.innerHTML,
