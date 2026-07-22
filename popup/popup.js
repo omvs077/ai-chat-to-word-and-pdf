@@ -86,7 +86,8 @@
       });
 
       if (!result || result.error === 'NO_MESSAGES_FOUND') {
-        throw new Error('No messages found. Open a conversation with at least one exchange, then try again.');
+        if (result && result.diagnostics) console.warn('[Ai chat to word & pdf] detection failed, tried:', result.diagnostics);
+        throw new Error('Could not find any messages on this page. Open DevTools console for details, or open a conversation with at least one exchange and try again.');
       }
 
       const turndown = new TurndownService({ headingStyle: 'atx', codeBlockStyle: 'fenced' });
@@ -125,3 +126,4 @@
   exportBtn.addEventListener('click', runExport);
   detectPlatform();
 })();
+
