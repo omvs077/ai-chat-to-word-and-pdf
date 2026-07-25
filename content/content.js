@@ -154,6 +154,35 @@
       .map(node => ({ title: node.textContent.trim().slice(0, 120) || 'Untitled artifact' }));
   }
 
+  // Tool-use/status disclosure widgets ("Ran 7 commands", "Connecting to
+  // visualize...", "Analyzed X and identified Y") render as their own
+  // <button class="group/status" aria-expanded="..."> row, which sits
+  // OUTSIDE the .font-claude-response text node — so extractCodeBlocks-style
+  // el.querySelectorAll() alone never sees them. No data-testid exists on
+  // this element (confirmed via live DevTools inspection), so — same as
+  // .font-claude-response — this is a styling-class signal, not a semantic
+  // one. To avoid the same risk we just fixed for sidebar contamination,
+  // search is bounded to the turn's own data-index ancestor (walking up to
+  // 8 levels, matching turnKey/sortIndexFor's existing boundary) rather
+  // than searching the whole document.
+  const TOOL_STATUS_SELECTOR = 'button.group\\/status[aria-expanded]';
+
+  function findTurnScope(el) {
+    let n = el;
+    for (let i = 0; i < 8 && n; i++) {
+      if (n.dataset && n.dataset.index !== undefined) return n;
+      n = n.parentElement;
+    }
+    return el; // no data-index ancestor found - stay conservative, don't widen scope
+  }
+
+  function extractToolUses(el) {
+    const scope = findTurnScope(el);
+    return Array.from(scope.querySelectorAll(TOOL_STATUS_SELECTOR))
+      .map(btn => btn.textContent.trim())
+      .filter(Boolean);
+  }
+
   // Message lists are commonly virtualized — only rows near the current
   // scroll position exist in the DOM at any moment, with a spacer div faking
   // the scrollbar height. Reading the DOM once, even after scrolling to the
@@ -205,7 +234,7 @@
       const key = turnKey(role, el);
       if (collected.has(key)) continue;
       const clone = el.cloneNode(true);
-      STRIP_SELECTORS.concat('[data-testid*="artifact" i]').forEach(sel => {
+      STRIP_SELECTORS.concat('[data-testid*="artifact" i]', TOOL_STATUS_SELECTOR).forEach(sel => {
         clone.querySelectorAll(sel).forEach(n => n.remove());
       });
       const idx = sortIndexFor(el);
@@ -215,6 +244,7 @@
         codeBlocks: extractCodeBlocks(el),
         images: extractImages(el),
         artifacts: extractArtifacts(el),
+        toolUses: extractToolUses(el),
         _sortIndex: idx === null ? null : idx * 2 + (role === 'user' ? 0 : 1),
         _seq: seq.n++,
         _method: detected.method

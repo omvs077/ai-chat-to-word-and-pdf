@@ -93,6 +93,14 @@
       const turndown = new TurndownService({ headingStyle: 'atx', codeBlockStyle: 'fenced' });
       result.turns.forEach(t => {
         let md = turndown.turndown(t.html || '');
+        if (t.toolUses && t.toolUses.length) {
+          // Real captured text, not a generic placeholder - each disclosure
+          // widget ("Ran 7 commands", "Connecting to visualize...") reads
+          // above the response text in the actual UI, so it's prepended
+          // here in the same order, each as its own italic line.
+          const toolLines = t.toolUses.map(u => `*${u}*`).join('\n\n');
+          md = `${toolLines}\n\n${md}`;
+        }
         if (t.artifacts && t.artifacts.length) {
           md += t.artifacts.map(a => `\n\n📎 **Artifact:** ${a.title} — open this conversation in Claude to view/edit it.`).join('');
         }
