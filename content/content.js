@@ -178,11 +178,29 @@
     return null;
   }
 
-  function captureVisible(collected, seq) {
+  function captureVisible(collected, seq, container) {
     const detected = detectTurnNodes();
     if (!detected) return;
     const found = dropAncestors(detected.userNodes).map(el => ({ role: 'user', el }))
-      .concat(dropAncestors(detected.assistantNodes).map(el => ({ role: 'assistant', el })));
+      .concat(dropAncestors(detected.assistantNodes).map(el => ({ role: 'assistant', el })))
+      // Safety net against sidebar/nav contamination: a matched node is only
+      // a real turn if it actually lives inside the message-list container
+      // we're scrolling. Protects against reused styling classes (e.g. a
+      // sidebar preview sharing '.font-claude-response') regardless of
+      // which selector tier matched it.
+      .filter(({ el }) => container.contains(el))
+      // Matched user/assistant nodes come from two separate querySelectorAll
+      // calls, so `found` is grouped by role, not reading order. Nodes are
+      // still attached to the live DOM at this point (capture happens
+      // before we scroll away), so compareDocumentPosition gives a real,
+      // reliable reading-order sort — this is what makes the _seq fallback
+      // below correct for turns that have no resolvable data-index.
+      .sort((a, b) => {
+        const pos = a.el.compareDocumentPosition(b.el);
+        if (pos & Node.DOCUMENT_POSITION_FOLLOWING) return -1;
+        if (pos & Node.DOCUMENT_POSITION_PRECEDING) return 1;
+        return 0;
+      });
     for (const { role, el } of found) {
       const key = turnKey(role, el);
       if (collected.has(key)) continue;
@@ -227,14 +245,14 @@
     await sleep(200);
     let guard = 0;
     while (guard < 500) {
-      captureVisible(collected, seq);
+      captureVisible(collected, seq, container);
       const atBottom = container.scrollTop + container.clientHeight >= container.scrollHeight - 4;
       if (atBottom) break;
       container.scrollTop += Math.max(120, container.clientHeight * 0.4);
       await sleep(150);
       guard++;
     }
-    captureVisible(collected, seq);
+    captureVisible(collected, seq, container);
 
     return collected;
   }
@@ -245,10 +263,18 @@
     return { error: 'NO_MESSAGES_FOUND', diagnostics: tried };
   }
 
-  const ordered = Array.from(collected.values()).sort((a, b) => {
-    if (a._sortIndex !== null && b._sortIndex !== null) return a._sortIndex - b._sortIndex;
-    return a._seq - b._seq;
-  }).map(({ _sortIndex, _seq, _method, ...rest }) => rest);
+  // Two-pass STABLE sort (Array.sort has been stable since ES2019, which
+  // this relies on). A single comparator mixing _sortIndex and _seq is
+  // inconsistent whenever only some turns have a resolvable data-index —
+  // comparing (indexed, unindexed) falls back to comparing two numbers on
+  // different scales, which can misplace turns anywhere in the list.
+  // Instead: establish a correct baseline order by capture sequence first,
+  // then do a stable re-sort by _sortIndex — pairs where either side is
+  // null keep their baseline position instead of being compared at all.
+  const ordered = Array.from(collected.values())
+    .sort((a, b) => a._seq - b._seq)
+    .sort((a, b) => (a._sortIndex === null || b._sortIndex === null) ? 0 : a._sortIndex - b._sortIndex)
+    .map(({ _sortIndex, _seq, _method, ...rest }) => rest);
 
   const methodsUsed = Array.from(new Set(Array.from(collected.values()).map(t => t._method)));
 
