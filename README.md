@@ -47,12 +47,26 @@ Popup (popup.js)
 ## Known limitations
 
 - Currently supports **claude.ai only**.
-- DOM selectors are based on Claude's current UI (`data-testid` attributes) and may need updating if Claude changes its markup — see `content/content.js`.
-- PDF output uses plain text styling (no inline bold/italic) to keep layout simple and reliable; the `.docx` output preserves inline formatting.
+- DOM selectors are based on Claude's current UI (`data-testid` attributes, and one styling-class selector `.font-claude-response`/`.group\/status` confirmed via live DevTools inspection) and may need updating if Claude changes its markup — see `content/content.js`. Detection degrades through 3 tiers (exact selectors → common attribute patterns → pure structural inference) rather than failing outright; Tier 3 is only verified via simulation, never against a real redesigned page.
+- PDF text uses real embedded Unicode fonts (Noto Sans + companion Symbols/Devanagari/Emoji fonts, see `lib/vendor/fonts-base64.js`) so arrows, checkmarks, currency symbols, and emoji render correctly instead of corrupting the paragraph. Two residual limitations, both from jsPDF itself rather than fixable here:
+  - **Devanagari renders as individual correct glyphs but unshaped** — jsPDF has no OpenType text-shaping engine (no HarfBuzz equivalent), so conjunct formation/vowel reordering doesn't happen.
+  - **Copy-pasting/text-extracting supplementary-plane emoji** (e.g. 📎) from the PDF can be unreliable — jsPDF doesn't generate correct `ToUnicode` CMap entries for those codepoints. Visual rendering is correct; only extraction is affected.
+- PDF links are not real clickable hyperlinks — they render as visible `text (url)` plain text.
 
 ## Development
 
 No build step — all files are plain JS/HTML/CSS loaded directly by the browser. To update a vendored library, download its UMD/browser build and replace the corresponding file in `lib/vendor/`.
+
+### Testing
+
+```
+npm install
+npm test
+```
+
+Runs the real committed test suite (`tests/`) via Node's built-in test runner (`node:test`) against jsdom, covering the DOM scraper (`content/content.js`) and the PDF generator's Unicode handling (`lib/pdf-generator.js`). These are dev-only dependencies (`jsdom`, `pdf-parse`) — the shipped extension itself has zero runtime dependencies, everything it needs is vendored under `lib/vendor/`.
+
+If you add a new test file, just drop it in `tests/` as `*.test.js` — `tests/run.js` discovers files automatically, no config to update.
 
 ## License
 

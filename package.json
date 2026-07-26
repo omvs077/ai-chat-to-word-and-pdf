@@ -1,0 +1,12 @@
+{
+  "name": "ai-chat-to-word-and-pdf",
+  "private": true,
+  "description": "Dev/test tooling only. The shipped extension has zero runtime dependencies - everything it needs is vendored under lib/vendor (see README.md).",
+  "scripts": {
+    "test": "node tests/run.js"
+  },
+  "devDependencies": {
+    "jsdom": "^24.0.0",
+    "pdf-parse": "1.1.1"
+  }
+}
