@@ -1,4 +1,4 @@
-ï»¿(function () {
+(function () {
   const badge = document.getElementById('platformBadge');
   const exportBtn = document.getElementById('exportBtn');
   const statusLine = document.getElementById('statusLine');
@@ -78,7 +78,7 @@
 
     try {
       setStep('extract', 'is-active');
-      setStatus('Extracting conversation from the pageâ€¦');
+      setStatus('Extracting conversation from the page…');
 
       const [{ result }] = await chrome.scripting.executeScript({
         target: { tabId: activeTabId },
@@ -102,7 +102,7 @@
           md = `${toolLines}\n\n${md}`;
         }
         if (t.artifacts && t.artifacts.length) {
-          md += t.artifacts.map(a => `\n\nðŸ“Ž **Artifact:** ${a.title} â€” open this conversation in Claude to view/edit it.`).join('');
+          md += t.artifacts.map(a => `\n\n?? **Artifact:** ${a.title}${a.format ? ` (${a.format})` : ''} — open this conversation in Claude to view/edit it.`).join('');
         }
         t.markdown = md;
       });
@@ -110,20 +110,20 @@
       setStep('extract', 'is-done');
       fillRailsUpTo('compile');
       setStep('compile', 'is-active');
-      setStatus('Compiling documentâ€¦');
+      setStatus('Compiling document…');
 
       const blob = format === 'docx' ? await window.generateDocx(result) : await window.generatePdf(result);
 
       setStep('compile', 'is-done');
       fillRailsUpTo('save');
       setStep('save', 'is-active');
-      setStatus('Saving fileâ€¦');
+      setStatus('Saving file…');
 
       downloadBlob(blob, `claude-chat-export-${timestamp()}.${format}`);
 
       setStep('save', 'is-done');
       fillRailsUpTo('done');
-      setStatus('Download complete â€” check your downloads folder.', 'success');
+      setStatus('Download complete — check your downloads folder.', 'success');
     } catch (err) {
       setStatus(err.message || 'Something went wrong during export.', 'error');
     } finally {

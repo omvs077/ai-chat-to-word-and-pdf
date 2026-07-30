@@ -1,23 +1,23 @@
-ï»¿// Injected on-demand (via chrome.scripting.executeScript) only when the user
+// Injected on-demand (via chrome.scripting.executeScript) only when the user
 // clicks "Export chat" in the popup. Never runs passively or on page load.
 // Returns a JSON Intermediate Representation of the conversation; the last
 // expression's value (a Promise, since this is async) becomes the
-// executeScript() result â€” chrome.scripting awaits it automatically.
+// executeScript() result — chrome.scripting awaits it automatically.
 //
 // RESILIENCE DESIGN: no selector list can survive every future redesign, so
 // detection runs in tiers, each one less precise but less fragile than the
-// last. If a tier finds nothing, we fall through automatically â€” no error,
+// last. If a tier finds nothing, we fall through automatically — no error,
 // no re-injection needed. If ALL tiers fail, we report exactly what was
 // tried (see NO_MESSAGES_FOUND diagnostics below) so a fix takes one
 // screenshot instead of a guessing back-and-forth.
 //
-// Tier 1 â€” exact, site-specific selectors (fastest, most precise; breaks
+// Tier 1 — exact, site-specific selectors (fastest, most precise; breaks
 //          when Claude renames a class/testid).
-// Tier 2 â€” attribute *patterns* seen across multiple chat products (survives
+// Tier 2 — attribute *patterns* seen across multiple chat products (survives
 //          Claude renaming things, as long as the naming convention itself
-//          â€” data-testid, data-role, etc. â€” doesn't disappear).
-// Tier 3 â€” pure structural inference anchored on the message compose box,
-//          which essentially every chat UI has. No class names at all â€”
+//          — data-testid, data-role, etc. — doesn't disappear).
+// Tier 3 — pure structural inference anchored on the message compose box,
+//          which essentially every chat UI has. No class names at all —
 //          the most durable tier, but the least precise about roles.
 
 (async function extractClaudeChat() {
@@ -71,7 +71,7 @@
     if (u2.length && a2.length) return { userNodes: u2, assistantNodes: a2, method: 'tier2-common-attributes' };
 
     // Partial matches are still useful (e.g. Claude renames assistant class
-    // but user-message testid still works) â€” prefer whichever tier found
+    // but user-message testid still works) — prefer whichever tier found
     // the user side, since that selector has proven the most stable so far.
     if (userNodes.length) return { userNodes, assistantNodes: a2, method: 'tier1-user+tier2-assistant' };
     if (u2.length) return { userNodes: u2, assistantNodes, method: 'tier2-user+tier1-assistant' };
@@ -91,7 +91,7 @@
       const compose = findComposeBox();
       if (!compose) { tried.push('tier3: no compose box found'); return null; }
 
-      // Find the scrollable ancestor of the compose box's page â€” the
+      // Find the scrollable ancestor of the compose box's page — the
       // conversation list is usually the largest scrollable region on the
       // page, so search broadly rather than strictly from the compose box.
       const candidates = Array.from(document.querySelectorAll('body *')).filter(el => {
@@ -148,19 +148,41 @@
     }).map(img => ({ src: img.currentSrc || img.src, alt: img.alt || 'image' }));
   }
 
+  // Artifact cards render as <div class="group/artifact-block ...">, confirmed
+  // via live DevTools inspection of a real artifact turn. No data-testid
+  // exists anywhere on the card (the old '[data-testid*="artifact" i]'
+  // selector matched nothing and silently dropped every artifact). Same
+  // styling-class-but-stable category as TOOL_STATUS_SELECTOR below. Title
+  // comes from the inner button's aria-label ("View {title}"), which is a
+  // semantic attribute rather than a nested styling div, so it survives
+  // markup changes better than reading textContent off the card.
+  const ARTIFACT_BLOCK_SELECTOR = '.group\\/artifact-block';
+
   function extractArtifacts(el) {
-    return Array.from(el.querySelectorAll('[data-testid*="artifact" i]'))
-      .filter(node => !node.querySelector('[data-testid*="artifact" i]'))
-      .map(node => ({ title: node.textContent.trim().slice(0, 120) || 'Untitled artifact' }));
+    return Array.from(el.querySelectorAll(ARTIFACT_BLOCK_SELECTOR))
+      .filter(node => !node.querySelector(ARTIFACT_BLOCK_SELECTOR))
+      .map(node => {
+        const viewBtn = node.querySelector('button[aria-label^="View "]');
+        const title = viewBtn
+          ? viewBtn.getAttribute('aria-label').replace(/^View /, '')
+          : (node.textContent.trim().slice(0, 120) || 'Untitled artifact');
+        // The meta line (e.g. "Document · MD" or just "ZIP" for single-format
+        // cards) is identified by its own class combo (text-xs + line-clamp-1),
+        // not by content-sniffing for '·' - single-format artifacts have no
+        // separator at all, confirmed via a real ZIP artifact card.
+        const metaEl = node.querySelector('.text-xs.line-clamp-1');
+        const format = metaEl ? metaEl.textContent.replace(/\s+/g, ' ').trim() : '';
+        return { title, format };
+      });
   }
 
   // Tool-use/status disclosure widgets ("Ran 7 commands", "Connecting to
   // visualize...", "Analyzed X and identified Y") render as their own
   // <button class="group/status" aria-expanded="..."> row, which sits
-  // OUTSIDE the .font-claude-response text node â€” so extractCodeBlocks-style
+  // OUTSIDE the .font-claude-response text node — so extractCodeBlocks-style
   // el.querySelectorAll() alone never sees them. No data-testid exists on
-  // this element (confirmed via live DevTools inspection), so â€” same as
-  // .font-claude-response â€” this is a styling-class signal, not a semantic
+  // this element (confirmed via live DevTools inspection), so — same as
+  // .font-claude-response — this is a styling-class signal, not a semantic
   // one. To avoid the same risk we just fixed for sidebar contamination,
   // search is bounded to the turn's own data-index ancestor (walking up to
   // 8 levels, matching turnKey/sortIndexFor's existing boundary) rather
@@ -183,7 +205,7 @@
       .filter(Boolean);
   }
 
-  // Message lists are commonly virtualized â€” only rows near the current
+  // Message lists are commonly virtualized — only rows near the current
   // scroll position exist in the DOM at any moment, with a spacer div faking
   // the scrollbar height. Reading the DOM once, even after scrolling to the
   // top, only ever captures the head and tail. So we walk the scroll
@@ -222,7 +244,7 @@
       // calls, so `found` is grouped by role, not reading order. Nodes are
       // still attached to the live DOM at this point (capture happens
       // before we scroll away), so compareDocumentPosition gives a real,
-      // reliable reading-order sort â€” this is what makes the _seq fallback
+      // reliable reading-order sort — this is what makes the _seq fallback
       // below correct for turns that have no resolvable data-index.
       .sort((a, b) => {
         const pos = a.el.compareDocumentPosition(b.el);
@@ -234,7 +256,7 @@
       const key = turnKey(role, el);
       if (collected.has(key)) continue;
       const clone = el.cloneNode(true);
-      STRIP_SELECTORS.concat('[data-testid*="artifact" i]', TOOL_STATUS_SELECTOR).forEach(sel => {
+      STRIP_SELECTORS.concat(ARTIFACT_BLOCK_SELECTOR, TOOL_STATUS_SELECTOR).forEach(sel => {
         clone.querySelectorAll(sel).forEach(n => n.remove());
       });
       const idx = sortIndexFor(el);
@@ -295,11 +317,11 @@
 
   // Two-pass STABLE sort (Array.sort has been stable since ES2019, which
   // this relies on). A single comparator mixing _sortIndex and _seq is
-  // inconsistent whenever only some turns have a resolvable data-index â€”
+  // inconsistent whenever only some turns have a resolvable data-index —
   // comparing (indexed, unindexed) falls back to comparing two numbers on
   // different scales, which can misplace turns anywhere in the list.
   // Instead: establish a correct baseline order by capture sequence first,
-  // then do a stable re-sort by _sortIndex â€” pairs where either side is
+  // then do a stable re-sort by _sortIndex — pairs where either side is
   // null keep their baseline position instead of being compared at all.
   const ordered = Array.from(collected.values())
     .sort((a, b) => a._seq - b._seq)
