@@ -1,23 +1,23 @@
-// Injected on-demand (via chrome.scripting.executeScript) only when the user
+ï»¿// Injected on-demand (via chrome.scripting.executeScript) only when the user
 // clicks "Export chat" in the popup. Never runs passively or on page load.
 // Returns a JSON Intermediate Representation of the conversation; the last
 // expression's value (a Promise, since this is async) becomes the
-// executeScript() result — chrome.scripting awaits it automatically.
+// executeScript() result â€” chrome.scripting awaits it automatically.
 //
 // RESILIENCE DESIGN: no selector list can survive every future redesign, so
 // detection runs in tiers, each one less precise but less fragile than the
-// last. If a tier finds nothing, we fall through automatically — no error,
+// last. If a tier finds nothing, we fall through automatically â€” no error,
 // no re-injection needed. If ALL tiers fail, we report exactly what was
 // tried (see NO_MESSAGES_FOUND diagnostics below) so a fix takes one
 // screenshot instead of a guessing back-and-forth.
 //
-// Tier 1 — exact, site-specific selectors (fastest, most precise; breaks
+// Tier 1 â€” exact, site-specific selectors (fastest, most precise; breaks
 //          when Claude renames a class/testid).
-// Tier 2 — attribute *patterns* seen across multiple chat products (survives
+// Tier 2 â€” attribute *patterns* seen across multiple chat products (survives
 //          Claude renaming things, as long as the naming convention itself
-//          — data-testid, data-role, etc. — doesn't disappear).
-// Tier 3 — pure structural inference anchored on the message compose box,
-//          which essentially every chat UI has. No class names at all —
+//          â€” data-testid, data-role, etc. â€” doesn't disappear).
+// Tier 3 â€” pure structural inference anchored on the message compose box,
+//          which essentially every chat UI has. No class names at all â€”
 //          the most durable tier, but the least precise about roles.
 
 (async function extractClaudeChat() {
@@ -71,7 +71,7 @@
     if (u2.length && a2.length) return { userNodes: u2, assistantNodes: a2, method: 'tier2-common-attributes' };
 
     // Partial matches are still useful (e.g. Claude renames assistant class
-    // but user-message testid still works) — prefer whichever tier found
+    // but user-message testid still works) â€” prefer whichever tier found
     // the user side, since that selector has proven the most stable so far.
     if (userNodes.length) return { userNodes, assistantNodes: a2, method: 'tier1-user+tier2-assistant' };
     if (u2.length) return { userNodes: u2, assistantNodes, method: 'tier2-user+tier1-assistant' };
@@ -91,7 +91,7 @@
       const compose = findComposeBox();
       if (!compose) { tried.push('tier3: no compose box found'); return null; }
 
-      // Find the scrollable ancestor of the compose box's page — the
+      // Find the scrollable ancestor of the compose box's page â€” the
       // conversation list is usually the largest scrollable region on the
       // page, so search broadly rather than strictly from the compose box.
       const candidates = Array.from(document.querySelectorAll('body *')).filter(el => {
@@ -141,11 +141,24 @@
   }
 
   function extractImages(el) {
-    return Array.from(el.querySelectorAll('img')).filter(img => {
+    // Uploaded-file thumbnails render in a sibling <div> BEFORE the message
+    // bubble, outside [data-testid="user-message"] entirely (confirmed via
+    // real DOM: class="gap-2 mx-0.5 mb-3 flex flex-wrap justify-end" sits
+    // alongside, not inside, the bubble container) - so searching only el's
+    // own subtree misses every user-uploaded image. findTurnScope() already
+    // solves exactly this class of problem for tool-use widgets; reused here
+    // rather than inventing a second, narrower boundary.
+    const scope = findTurnScope(el);
+    return Array.from(scope.querySelectorAll('img')).filter(img => {
       const w = img.naturalWidth || img.width || 0;
       const h = img.naturalHeight || img.height || 0;
       return (w === 0 && h === 0) || (w > 48 && h > 48);
-    }).map(img => ({ src: img.currentSrc || img.src, alt: img.alt || 'image' }));
+    }).map(img => ({
+      src: img.currentSrc || img.src,
+      alt: img.alt || 'image',
+      width: img.naturalWidth || img.width || 0,
+      height: img.naturalHeight || img.height || 0
+    }));
   }
 
   // Artifact cards render as <div class="group/artifact-block ...">, confirmed
@@ -166,9 +179,9 @@
         const title = viewBtn
           ? viewBtn.getAttribute('aria-label').replace(/^View /, '')
           : (node.textContent.trim().slice(0, 120) || 'Untitled artifact');
-        // The meta line (e.g. "Document · MD" or just "ZIP" for single-format
+        // The meta line (e.g. "Document Â· MD" or just "ZIP" for single-format
         // cards) is identified by its own class combo (text-xs + line-clamp-1),
-        // not by content-sniffing for '·' - single-format artifacts have no
+        // not by content-sniffing for 'Â·' - single-format artifacts have no
         // separator at all, confirmed via a real ZIP artifact card.
         const metaEl = node.querySelector('.text-xs.line-clamp-1');
         const format = metaEl ? metaEl.textContent.replace(/\s+/g, ' ').trim() : '';
@@ -179,10 +192,10 @@
   // Tool-use/status disclosure widgets ("Ran 7 commands", "Connecting to
   // visualize...", "Analyzed X and identified Y") render as their own
   // <button class="group/status" aria-expanded="..."> row, which sits
-  // OUTSIDE the .font-claude-response text node — so extractCodeBlocks-style
+  // OUTSIDE the .font-claude-response text node â€” so extractCodeBlocks-style
   // el.querySelectorAll() alone never sees them. No data-testid exists on
-  // this element (confirmed via live DevTools inspection), so — same as
-  // .font-claude-response — this is a styling-class signal, not a semantic
+  // this element (confirmed via live DevTools inspection), so â€” same as
+  // .font-claude-response â€” this is a styling-class signal, not a semantic
   // one. To avoid the same risk we just fixed for sidebar contamination,
   // search is bounded to the turn's own data-index ancestor (walking up to
   // 8 levels, matching turnKey/sortIndexFor's existing boundary) rather
@@ -191,7 +204,7 @@
 
   function findTurnScope(el) {
     let n = el;
-    for (let i = 0; i < 8 && n; i++) {
+    for (let i = 0; i < 12 && n; i++) {
       if (n.dataset && n.dataset.index !== undefined) return n;
       n = n.parentElement;
     }
@@ -205,7 +218,7 @@
       .filter(Boolean);
   }
 
-  // Message lists are commonly virtualized — only rows near the current
+  // Message lists are commonly virtualized â€” only rows near the current
   // scroll position exist in the DOM at any moment, with a spacer div faking
   // the scrollbar height. Reading the DOM once, even after scrolling to the
   // top, only ever captures the head and tail. So we walk the scroll
@@ -213,7 +226,7 @@
   // is mounted at each stop before it gets unmounted again.
   function turnKey(role, el) {
     let n = el;
-    for (let i = 0; i < 8 && n; i++) {
+    for (let i = 0; i < 12 && n; i++) {
       if (n.dataset && n.dataset.index !== undefined) return `idx:${n.dataset.index}:${role}`;
       n = n.parentElement;
     }
@@ -222,7 +235,7 @@
 
   function sortIndexFor(el) {
     let n = el;
-    for (let i = 0; i < 8 && n; i++) {
+    for (let i = 0; i < 12 && n; i++) {
       if (n.dataset && n.dataset.index !== undefined) return Number(n.dataset.index);
       n = n.parentElement;
     }
@@ -244,7 +257,7 @@
       // calls, so `found` is grouped by role, not reading order. Nodes are
       // still attached to the live DOM at this point (capture happens
       // before we scroll away), so compareDocumentPosition gives a real,
-      // reliable reading-order sort — this is what makes the _seq fallback
+      // reliable reading-order sort â€” this is what makes the _seq fallback
       // below correct for turns that have no resolvable data-index.
       .sort((a, b) => {
         const pos = a.el.compareDocumentPosition(b.el);
@@ -309,6 +322,47 @@
     return collected;
   }
 
+  // Images captured by extractImages() point at same-origin, session-
+  // authenticated URLs (e.g. /api/.../files/.../preview) - fine inside the
+  // page, but a dead/unusable link once exported. This fetches each image's
+  // real bytes (same-origin, uses the page's own cookies - no external
+  // network calls) and attaches a base64 data URI directly onto the image
+  // object (t.images), rather than reparsing/mutating turn HTML - images
+  // are appended to the markdown by popup.js the same way artifacts and
+  // tool-uses already are, independent of where the <img> actually lived in
+  // the source DOM (which, per extractImages(), can be outside the turn's
+  // own node entirely). Runs once after the scroll-walk finishes, not
+  // per-scroll-step, to avoid re-fetching the same image multiple times.
+  const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+  function blobToDataURL(blob) {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = () => reject(reader.error);
+      reader.readAsDataURL(blob);
+    });
+  }
+  async function embedImages(turns) {
+    for (const t of turns) {
+      if (!t.images || !t.images.length) continue;
+      for (const img of t.images) {
+        if (!img.src) { img.error = 'could not be loaded'; continue; }
+        try {
+          const resp = await fetch(img.src);
+          if (!resp.ok) throw new Error(`HTTP ${resp.status}`);
+          const blob = await resp.blob();
+          if (blob.size > MAX_IMAGE_BYTES) {
+            img.error = `too large to embed, ${(blob.size / (1024 * 1024)).toFixed(1)} MB`;
+            continue;
+          }
+          img.dataUrl = await blobToDataURL(blob);
+        } catch (_) {
+          img.error = 'could not be loaded';
+        }
+      }
+    }
+  }
+
   const collected = await collectAllTurns();
 
   if (!collected.size) {
@@ -317,16 +371,18 @@
 
   // Two-pass STABLE sort (Array.sort has been stable since ES2019, which
   // this relies on). A single comparator mixing _sortIndex and _seq is
-  // inconsistent whenever only some turns have a resolvable data-index —
+  // inconsistent whenever only some turns have a resolvable data-index â€”
   // comparing (indexed, unindexed) falls back to comparing two numbers on
   // different scales, which can misplace turns anywhere in the list.
   // Instead: establish a correct baseline order by capture sequence first,
-  // then do a stable re-sort by _sortIndex — pairs where either side is
+  // then do a stable re-sort by _sortIndex â€” pairs where either side is
   // null keep their baseline position instead of being compared at all.
   const ordered = Array.from(collected.values())
     .sort((a, b) => a._seq - b._seq)
     .sort((a, b) => (a._sortIndex === null || b._sortIndex === null) ? 0 : a._sortIndex - b._sortIndex)
     .map(({ _sortIndex, _seq, _method, ...rest }) => rest);
+
+  await embedImages(ordered);
 
   const methodsUsed = Array.from(new Set(Array.from(collected.values()).map(t => t._method)));
 

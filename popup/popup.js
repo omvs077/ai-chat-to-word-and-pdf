@@ -1,4 +1,4 @@
-(function () {
+ï»¿(function () {
   const badge = document.getElementById('platformBadge');
   const exportBtn = document.getElementById('exportBtn');
   const statusLine = document.getElementById('statusLine');
@@ -70,6 +70,18 @@
     return `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}`;
   }
 
+  function sanitizeFilename(name) {
+    // Strips characters invalid in Windows/Mac/Linux filenames, collapses
+    // whitespace, and caps length - keeps the real conversation title
+    // usable as a filename without ever producing an unwritable path.
+    return (name || 'Claude Conversation')
+      .replace(/[<>:"/\\|?*\x00-\x1F]/g, '')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .slice(0, 80)
+      .trim() || 'Claude Conversation';
+  }
+
   async function runExport() {
     exportBtn.disabled = true;
     pipeline.hidden = false;
@@ -78,7 +90,7 @@
 
     try {
       setStep('extract', 'is-active');
-      setStatus('Extracting conversation from the page…');
+      setStatus('Extracting conversation from the pageâ€¦');
 
       const [{ result }] = await chrome.scripting.executeScript({
         target: { tabId: activeTabId },
@@ -102,7 +114,16 @@
           md = `${toolLines}\n\n${md}`;
         }
         if (t.artifacts && t.artifacts.length) {
-          md += t.artifacts.map(a => `\n\n?? **Artifact:** ${a.title}${a.format ? ` (${a.format})` : ''} — open this conversation in Claude to view/edit it.`).join('');
+          md += t.artifacts.map(a => `\n\nðŸ“Ž **Artifact:** ${a.title}${a.format ? ` (${a.format})` : ''} â€” open this conversation in Claude to view/edit it.`).join('');
+        }
+        if (t.images && t.images.length) {
+          md += t.images.map(img => {
+            if (img.dataUrl) {
+              const dims = img.width && img.height ? `\u241F${img.width}x${img.height}` : '';
+              return `\n\n![${img.alt}${dims}](${img.dataUrl})`;
+            }
+            return `\n\n[Image: ${img.alt}${img.error ? ` \u2014 ${img.error}` : ''}]`;
+          }).join('');
         }
         t.markdown = md;
       });
@@ -110,20 +131,20 @@
       setStep('extract', 'is-done');
       fillRailsUpTo('compile');
       setStep('compile', 'is-active');
-      setStatus('Compiling document…');
+      setStatus('Compiling documentâ€¦');
 
       const blob = format === 'docx' ? await window.generateDocx(result) : await window.generatePdf(result);
 
       setStep('compile', 'is-done');
       fillRailsUpTo('save');
       setStep('save', 'is-active');
-      setStatus('Saving file…');
+      setStatus('Saving fileâ€¦');
 
-      downloadBlob(blob, `claude-chat-export-${timestamp()}.${format}`);
+      downloadBlob(blob, `${sanitizeFilename(result.title)}-${timestamp()}.${format}`);
 
       setStep('save', 'is-done');
       fillRailsUpTo('done');
-      setStatus('Download complete — check your downloads folder.', 'success');
+      setStatus('Download complete â€” check your downloads folder.', 'success');
     } catch (err) {
       setStatus(err.message || 'Something went wrong during export.', 'error');
     } finally {
@@ -134,4 +155,3 @@
   exportBtn.addEventListener('click', runExport);
   detectPlatform();
 })();
-
