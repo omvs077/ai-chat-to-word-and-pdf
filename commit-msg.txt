@@ -1,0 +1,28 @@
+Add real PDF hyperlinks and real docx-generator test coverage
+
+PDF links (lib/pdf-generator.js):
+- Markdown links used to be flattened to plain "label (url)" text by
+  stripInline(). Now routed through the shared parseInlineRuns() (the
+  same function docx-generator.js already used for real hyperlinks) so
+  links become real clickable PDF annotations (/Subtype /Link + /URI),
+  styled blue+underlined to match the existing docx Hyperlink style.
+  Covers paragraphs, headings, and list items.
+- stripInline() removed as dead code now that linkChunks() replaces its
+  only call site.
+
+docx-generator.js test coverage (previously zero):
+- Root-caused the long-standing docx.Packer.toBuffer()/toBlob() hang:
+  it was jsdom's own fake event loop failing to relay JSZip's async
+  generation scheduling, not vm.runInContext or docx.Packer itself.
+  A plain vm.createContext sandbox (no jsdom) runs it correctly -
+  confirmed by generating and unzipping a real, valid .docx.
+- New tests/helpers/docx-harness.js: vm-based harness (mirrors
+  pdf-harness.js's pattern) plus a minimal, dependency-free ZIP reader
+  for inspecting real .docx output (word/document.xml, relationships,
+  media files) without adding a new npm dependency.
+- New tests/docx-generator.test.js: 9 tests against real generated
+  output - core zip structure, heading/list/code-block formatting,
+  real hyperlink relationships, and a byte-identical (md5-verified)
+  round-trip check on real embedded image data.
+
+Test suite: 15 -> 25 passing tests.

@@ -76,3 +76,26 @@ test('long code block still spans a page break correctly (no regression from the
   assert.ok(text.includes('line 0 of'), 'first line must survive');
   assert.ok(text.includes('line 79 of'), 'last line (after the page break) must survive unclipped');
 });
+
+// Markdown links used to be flattened to plain 'label (url)' text by the old
+// stripInline() - these check they're now real clickable PDF link
+// annotations (/Subtype /Link + /URI) instead, in both a plain paragraph
+// and a list item. pdf-parse only extracts visible text, not annotations,
+// so this reads the raw PDF bytes directly (same technique used for real
+// image-embedding verification elsewhere in this project).
+test('markdown link in a paragraph becomes a real clickable PDF annotation', async () => {
+  const buf = await generateFor('Check out [Anthropic](https://www.anthropic.com/) for more.');
+  const raw = buf.toString('latin1');
+  assert.ok(/\/Subtype\s*\/Link/.test(raw), 'must contain a real PDF link annotation, not flattened text');
+  assert.ok(raw.includes('www.anthropic.com'), 'the URL must be embedded in a /URI entry');
+  const { text } = await pdfParse(buf);
+  assert.ok(text.includes('Anthropic'), 'the visible link label must still render');
+  assert.ok(!text.includes('(https://www.anthropic.com/)'), 'must NOT fall back to the old flattened "label (url)" text');
+});
+
+test('markdown link inside a list item also becomes a real clickable PDF annotation', async () => {
+  const buf = await generateFor('- An item with a [link](https://example.com/list-target) inside it');
+  const raw = buf.toString('latin1');
+  assert.ok(/\/Subtype\s*\/Link/.test(raw), 'list items must get real link annotations too');
+  assert.ok(raw.includes('example.com/list-target'));
+});

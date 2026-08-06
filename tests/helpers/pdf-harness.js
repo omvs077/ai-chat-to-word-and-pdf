@@ -25,11 +25,10 @@ function loadWindow() {
 
   vm.runInContext(fs.readFileSync(path.join(LIB_DIR, 'vendor', 'jspdf.umd.min.js'), 'utf8'), ctx);
   vm.runInContext(fs.readFileSync(path.join(LIB_DIR, 'vendor', 'fonts-base64.js'), 'utf8'), ctx);
-  vm.runInContext(
-    fs.readFileSync(path.join(LIB_DIR, 'markdown-blocks.js'), 'utf8') +
-    '\nwindow.MarkdownBlocks = { parseMarkdownBlocks };',
-    ctx
-  );
+  // markdown-blocks.js already sets window.MarkdownBlocks itself (including
+  // parseInlineRuns, which pdf-generator.js now also depends on for real
+  // link support) - no need to re-declare a narrower stub here.
+  vm.runInContext(fs.readFileSync(path.join(LIB_DIR, 'markdown-blocks.js'), 'utf8'), ctx);
   vm.runInContext(fs.readFileSync(path.join(LIB_DIR, 'pdf-generator.js'), 'utf8'), ctx);
 
   return window;
