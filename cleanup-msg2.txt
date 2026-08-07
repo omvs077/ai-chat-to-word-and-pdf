@@ -1,5 +1,0 @@
-Remove throwaway deploy helper files
-
-commit-msg2.txt and deploy2.ps1 were one-time local helpers used to land
-96a6001 - not meant to be part of the repo. Removing them; no functional
-change.
