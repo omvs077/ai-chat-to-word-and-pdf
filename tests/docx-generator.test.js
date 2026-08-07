@@ -99,3 +99,62 @@ test('the real conversation title and export line round-trip correctly', async (
   assert.ok(xml.includes('claude.ai/chat/abc123'));
   assert.ok(xml.includes('You') && xml.includes('Claude'), 'both role labels must appear for a real two-turn conversation');
 });
+
+// Real bugs found by generating and inspecting an actual export (a chat
+// with real web-search-sourced images): ImageRun hard-codes every embedded
+// image's media filename as <id>.png regardless of real format, which
+// mislabels the OOXML content-type Word uses to decode the bytes - real
+// JPEG/WEBP bytes declared as image/png broke rendering, not just cosmetics.
+// Fixtures below are small but genuinely valid WEBP/JPEG files (real magic
+// bytes, real decodable structure), not fabricated garbage.
+const REAL_TINY_WEBP_B64 = 'UklGRjoAAABXRUJQVlA4IC4AAACwAQCdASoCAAIAAUAmJaACdLoABDAAAP7vUS/xbSOhTIf/cHH/YOP+wcfumAAA';
+const REAL_TINY_JPEG_B64 = '/9j/4AAQSkZJRgABAQAAAQABAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRofHh0aHBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/2wBDAQkJCQwLDBgNDRgyIRwhMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjIyMjL/wAARCAACAAIDASIAAhEBAxEB/8QAHwAAAQUBAQEBAQEAAAAAAAAAAAECAwQFBgcICQoL/8QAtRAAAgEDAwIEAwUFBAQAAAF9AQIDAAQRBRIhMUEGE1FhByJxFDKBkaEII0KxwRVS0fAkM2JyggkKFhcYGRolJicoKSo0NTY3ODk6Q0RFRkdISUpTVFVWV1hZWmNkZWZnaGlqc3R1dnd4eXqDhIWGh4iJipKTlJWWl5iZmqKjpKWmp6ipqrKztLW2t7i5usLDxMXGx8jJytLT1NXW19jZ2uHi4+Tl5ufo6erx8vP09fb3+Pn6/8QAHwEAAwEBAQEBAQEBAQAAAAAAAAECAwQFBgcICQoL/8QAtREAAgECBAQDBAcFBAQAAQJ3AAECAxEEBSExBhJBUQdhcRMiMoEIFEKRobHBCSMzUvAVYnLRChYkNOEl8RcYGRomJygpKjU2Nzg5OkNERUZHSElKU1RVVldYWVpjZGVmZ2hpanN0dXZ3eHl6goOEhYaHiImKkpOUlZaXmJmaoqOkpaanqKmqsrO0tba3uLm6wsPExcbHyMnK0tPU1dbX2Nna4uPk5ebn6Onq8vP09fb3+Pn6/9oADAMBAAIRAxEAPwDnqKKK8k/Qz//Z';
+
+test('a real WEBP image gets the correct .webp filename and a matching Content-Type entry', async () => {
+  const dataUrl = `data:image/webp;base64,${REAL_TINY_WEBP_B64}`;
+  const buf = await generateFor(`![a webp image\u241F50x50](${dataUrl})`);
+  const entries = listDocxEntries(buf);
+  const mediaName = entries.find(e => e.startsWith('word/media/') && e.endsWith('.webp'));
+  assert.ok(mediaName, 'must be saved with a real .webp extension, not the library default .png');
+
+  const extracted = readDocxEntryBuffer(buf, mediaName);
+  const original = Buffer.from(REAL_TINY_WEBP_B64, 'base64');
+  assert.equal(
+    crypto.createHash('md5').update(extracted).digest('hex'),
+    crypto.createHash('md5').update(original).digest('hex'),
+    'embedded WEBP bytes must be byte-identical to the source, not re-encoded'
+  );
+
+  const contentTypes = readDocxEntry(buf, '[Content_Types].xml');
+  assert.ok(contentTypes.includes('image/webp'),
+    'Content_Types.xml must declare image/webp - otherwise Word has no way to know how to decode the part');
+});
+
+test('a real JPEG image gets a correct .jpg filename (already-supported content-type, rename-only fix)', async () => {
+  const dataUrl = `data:image/jpeg;base64,${REAL_TINY_JPEG_B64}`;
+  const buf = await generateFor(`![a jpeg image\u241F50x50](${dataUrl})`);
+  const entries = listDocxEntries(buf);
+  const mediaName = entries.find(e => e.startsWith('word/media/') && (e.endsWith('.jpg') || e.endsWith('.jpeg')));
+  assert.ok(mediaName, 'must be saved with a real .jpg/.jpeg extension, not the library default .png');
+
+  const extracted = readDocxEntryBuffer(buf, mediaName);
+  const original = Buffer.from(REAL_TINY_JPEG_B64, 'base64');
+  assert.equal(
+    crypto.createHash('md5').update(extracted).digest('hex'),
+    crypto.createHash('md5').update(original).digest('hex'),
+    'embedded JPEG bytes must be byte-identical to the source'
+  );
+});
+
+test('an AVIF image (no realistic Word support) falls back to a text placeholder instead of a broken embed', async () => {
+  // Word cannot render AVIF regardless of correct labeling - the correct
+  // behavior is the same readable placeholder unparseable-dimensions
+  // already uses, not an embed that will never actually decode.
+  const dataUrl = 'data:image/avif;base64,AAAAHGZ0eXBhdmlmAAAAAG1pZjFhdmlmbWlhZg==';
+  const buf = await generateFor(`![an avif image\u241F50x50](${dataUrl})`);
+  const entries = listDocxEntries(buf);
+  assert.ok(!entries.some(e => e.startsWith('word/media/')), 'must not attempt to embed a format Word cannot decode');
+
+  const xml = readDocxEntry(buf, 'word/document.xml');
+  assert.ok(xml.includes('format not supported in Word'), 'must fall back to a visible, informative placeholder');
+});

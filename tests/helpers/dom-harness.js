@@ -16,9 +16,13 @@ const CONTENT_JS_PATH = path.join(__dirname, '..', '..', 'content', 'content.js'
  *   compose box if needed.
  * @param {object} [sizes] - override scrollHeight/clientHeight per element id,
  *   e.g. { scrollList: { scrollHeight: 2000, clientHeight: 400 } }
+ * @param {(window: object) => void} [onReady] - optional hook invoked with
+ *   the live jsdom `window` right before extraction starts, for tests that
+ *   need to schedule a delayed DOM mutation (e.g. flipping
+ *   data-is-streaming) to prove extraction actually waits on it.
  * @returns {Promise<object>} the object extractClaudeChat() resolves to
  */
-async function runExtraction(bodyHtml, sizes = {}) {
+async function runExtraction(bodyHtml, sizes = {}, onReady) {
   const dom = new JSDOM(`<!doctype html><html><body>${bodyHtml}</body></html>`, {
     pretendToBeVisual: true,
     runScripts: 'outside-only',
@@ -56,6 +60,7 @@ async function runExtraction(bodyHtml, sizes = {}) {
     'window', 'document', 'location', 'getComputedStyle', 'Node',
     `return (${scriptSrc.trim().replace(/^\uFEFF/, '').replace(/;$/, '')});`
   );
+  if (onReady) onReady(window);
   return run(window, window.document, window.location, window.getComputedStyle, window.Node);
 }
 

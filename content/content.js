@@ -25,6 +25,8 @@
   const sleep = ms => new Promise(r => setTimeout(r, ms));
   const tried = []; // diagnostic trail for when everything fails
 
+  await waitForStreamingToFinish();
+
   function uniqueMatches(selectors) {
     const nodes = [];
     for (const sel of selectors) {
@@ -39,6 +41,27 @@
 
   function dropAncestors(nodes) {
     return nodes.filter((n, i) => !nodes.some((m, j) => i !== j && n.contains(m)));
+  }
+
+  // A response can still be actively streaming at the exact moment the user
+  // clicks Export (e.g. exporting right as/after clicking Stop, before the
+  // UI has re-rendered the final interrupted-state content). Confirmed via
+  // a real repro: content.js's own scrape and Turndown both faithfully
+  // capture whatever's in the DOM at read time - the loss was never in this
+  // pipeline, it was the DOM snapshot itself being stale. Each assistant
+  // turn's own wrapper carries data-is-streaming="true"/"false" (confirmed
+  // via live DevTools inspection), which flips to false once a response
+  // finishes OR gets interrupted - so polling on it, rather than only
+  // watching for completion, correctly waits out interruption too.
+  async function waitForStreamingToFinish(maxWaitMs = 15000) {
+    const start = Date.now();
+    while (document.querySelector('[data-is-streaming="true"]')) {
+      if (Date.now() - start > maxWaitMs) {
+        tried.push(`gave up waiting for a still-streaming response after ${maxWaitMs}ms`);
+        return;
+      }
+      await sleep(250);
+    }
   }
 
   // --- Tier 1: known-good selectors for the current claude.ai markup. ---
@@ -271,6 +294,21 @@
       const clone = el.cloneNode(true);
       STRIP_SELECTORS.concat(ARTIFACT_BLOCK_SELECTOR, TOOL_STATUS_SELECTOR).forEach(sel => {
         clone.querySelectorAll(sel).forEach(n => n.remove());
+      });
+      // The "Claude's response was interrupted." notice renders via a
+      // Banner widget whose icon is a private-use-area icon-font codepoint
+      // (meaningless outside Claude's own icon font - this is almost
+      // certainly the real root cause of a historical mojibake-glyph bug:
+      // that raw codepoint has no glyph in the embedded PDF/DOCX fonts).
+      // Its "Edit prompt"/"Try again" buttons would also leak into the
+      // markdown as literal trailing text. Replaced with a clean, readable
+      // marker instead of either problem - and instead of silently
+      // dropping the notice entirely, since a reader of the exported
+      // document should know a response was cut short.
+      clone.querySelectorAll('[data-cds="Banner"][role="status"]').forEach(banner => {
+        const p = document.createElement('p');
+        p.textContent = '[Response was interrupted]';
+        banner.replaceWith(p);
       });
       const idx = sortIndexFor(el);
       collected.set(key, {
