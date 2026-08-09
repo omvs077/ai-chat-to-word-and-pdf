@@ -128,6 +128,12 @@ test('a real WEBP image gets the correct .webp filename and a matching Content-T
   const contentTypes = readDocxEntry(buf, '[Content_Types].xml');
   assert.ok(contentTypes.includes('image/webp'),
     'Content_Types.xml must declare image/webp - otherwise Word has no way to know how to decode the part');
+
+  const xml = readDocxEntry(buf, 'word/document.xml');
+  const rels = readDocxEntry(buf, 'word/_rels/document.xml.rels');
+  const blipRef = xml.match(/r:embed="([^"]+)"/)[1];
+  assert.ok(/^rId\d+$/.test(blipRef), 'must be a real relationship ID, not an unresolved placeholder');
+  assert.ok(rels.includes(`Id="${blipRef}"`), 'the reference must resolve to an actually-declared relationship');
 });
 
 test('a real JPEG image gets a correct .jpg filename (already-supported content-type, rename-only fix)', async () => {
@@ -144,6 +150,12 @@ test('a real JPEG image gets a correct .jpg filename (already-supported content-
     crypto.createHash('md5').update(original).digest('hex'),
     'embedded JPEG bytes must be byte-identical to the source'
   );
+
+  const xml = readDocxEntry(buf, 'word/document.xml');
+  const rels = readDocxEntry(buf, 'word/_rels/document.xml.rels');
+  const blipRef = xml.match(/r:embed="([^"]+)"/)[1];
+  assert.ok(/^rId\d+$/.test(blipRef), 'must be a real relationship ID, not an unresolved placeholder');
+  assert.ok(rels.includes(`Id="${blipRef}"`), 'the reference must resolve to an actually-declared relationship');
 });
 
 test('an AVIF image (no realistic Word support) falls back to a text placeholder instead of a broken embed', async () => {
@@ -157,4 +169,55 @@ test('an AVIF image (no realistic Word support) falls back to a text placeholder
 
   const xml = readDocxEntry(buf, 'word/document.xml');
   assert.ok(xml.includes('format not supported in Word'), 'must fall back to a visible, informative placeholder');
+});
+
+// Real regression: a real multi-image export from an actual conversation
+// (2 WEBP + 7 JPEG) had every single image reference broken in Word, not
+// just non-PNG ones - confirmed via direct byte inspection of that real
+// .docx. Root cause: ImageRun's Drawing/Graphic tree bakes a placeholder
+// "rId{<filename>}" into the XML at CONSTRUCTION time using
+// this.imageData.fileName as it exists right then; a later find-and-replace
+// pass resolves that placeholder by matching against whatever key
+// Media.addImage() registers the file under in prepForXml(). An earlier fix
+// attempt mutated .key/.imageData.fileName AFTER construction (to correct
+// the extension) - which desynced those two reads and left the raw,
+// unresolved "rId{name.png}" placeholder sitting in the final XML for every
+// image. The single-image tests above never caught this because they never
+// checked that r:embed references actually RESOLVE to a declared
+// relationship - only that files existed with the right name/content-type.
+// This test specifically closes that gap: multi-image, mixed formats, and
+// an explicit resolution check.
+test('every image reference in a multi-image, mixed-format document resolves to a real relationship (regression)', async () => {
+  const pngB64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=';
+  const markdown = [
+    'A paragraph before any images.',
+    `![a webp image\u241F50x50](data:image/webp;base64,${REAL_TINY_WEBP_B64})`,
+    'Text between the first and second image.',
+    `![a jpeg image\u241F50x50](data:image/jpeg;base64,${REAL_TINY_JPEG_B64})`,
+    'Text between the second and third image.',
+    `![a png image\u241F50x50](data:image/png;base64,${pngB64})`,
+  ].join('\n\n');
+
+  const buf = await generateFor(markdown);
+  const xml = readDocxEntry(buf, 'word/document.xml');
+  const rels = readDocxEntry(buf, 'word/_rels/document.xml.rels');
+
+  assert.ok(!/rId\{/.test(xml), 'no raw unresolved "rId{...}" placeholder text may survive into the final document.xml');
+
+  const blipRefs = [...xml.matchAll(/r:embed="([^"]+)"/g)].map(m => m[1]);
+  assert.equal(blipRefs.length, 3, 'all three image references must be present');
+  assert.ok(blipRefs.every(r => /^rId\d+$/.test(r)), 'every reference must be a real sequential rId, not a leftover placeholder');
+
+  const relIds = [...rels.matchAll(/Id="([^"]+)"/g)].map(m => m[1]);
+  assert.ok(blipRefs.every(r => relIds.includes(r)), 'every image reference must resolve to an actually-declared relationship');
+
+  // Also confirm each rId maps to a real, existing media file - not just
+  // any declared relationship (a subtly weaker check than the one above).
+  const relMap = new Map([...rels.matchAll(/Id="([^"]+)"[^>]*Target="([^"]+)"/g)].map(m => [m[1], m[2]]));
+  const entries = listDocxEntries(buf);
+  for (const rid of blipRefs) {
+    const target = relMap.get(rid);
+    assert.ok(target, `${rid} must map to a real target`);
+    assert.ok(entries.includes('word/' + target), `${rid}'s target (${target}) must actually exist in the zip`);
+  }
 });
