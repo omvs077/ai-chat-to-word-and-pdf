@@ -88,17 +88,33 @@
     return null;
   }
 
-  // Generic "walk up until something actually scrolls" - not ChatGPT-
-  // specific at all, and deliberately reused verbatim from content.js's own
-  // findScrollContainer rather than hardcoding the "scrollport" class
-  // fragment confirmed via live inspection - that class only matters for
-  // recognizing the real container by coincidence; this structural check
-  // finds the same element without depending on any class name surviving a
-  // future redesign.
+  // Confirmed via live DevTools inspection: a generic "walk up until tall
+  // enough" check (content.js's approach, reused verbatim in an earlier
+  // version of this function) produces a false positive on chatgpt.com -
+  // it finds <main> (scrollHeight 6725 vs clientHeight 858) before ever
+  // reaching the real scrolling element, because <main> is naturally tall
+  // from normal page layout without itself being the overflow:auto surface
+  // that actually scrolls. Setting scrollTop on it does nothing, so the
+  // stability-wait loop spins for its full ceiling waiting for a
+  // scrollHeight that can never change - confirmed as the exact cause of a
+  // real "stuck at Extracting..., no visible scrolling" hang.
+  //
+  // Fixed two ways: (1) a real, live-confirmed class fragment
+  // ("group/scrollport ... overflow-y-auto", scrollHeight 1343 vs
+  // clientHeight 844 when checked directly) is tried first; (2) the
+  // fallback walk now also requires genuine overflow-y:auto|scroll on the
+  // computed style, not just a height difference, so it can no longer
+  // false-positive on a merely-tall non-scrolling wrapper the way the
+  // original height-only check did.
   function findScrollContainer(fromEl) {
+    const knownScrollport = document.querySelector('[class*="scrollport" i]');
+    if (knownScrollport && knownScrollport.scrollHeight > knownScrollport.clientHeight) return knownScrollport;
+
     let el = fromEl;
     while (el && el !== document.body) {
-      if (el.scrollHeight > el.clientHeight + 40) return el;
+      const style = getComputedStyle(el);
+      const scrollable = style.overflowY === 'auto' || style.overflowY === 'scroll';
+      if (scrollable && el.scrollHeight > el.clientHeight + 40) return el;
       el = el.parentElement;
     }
     return document.scrollingElement || document.documentElement;

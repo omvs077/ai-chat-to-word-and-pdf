@@ -134,6 +134,33 @@ test('images/artifacts/toolUses are always empty arrays in v1 (deliberately defe
   }
 });
 
+test('does not mistake a merely-tall non-scrolling wrapper for the real scroll container (regression)', async () => {
+  // Real bug found on a live export: a generic "walk up until tall enough"
+  // check found a non-scrolling <main> wrapper (confirmed live:
+  // scrollHeight 6725 vs clientHeight 858) before ever reaching the real
+  // overflow-y:auto scroll container - <main> is naturally tall from
+  // normal page layout without itself being the element that scrolls.
+  // Setting scrollTop on it did nothing, so extraction hung indefinitely
+  // waiting for a scrollHeight that could never change. This reconstructs
+  // that exact shape: an outer wrapper that LOOKS scrollable by height
+  // alone, wrapping the real scrollable region deeper in the tree.
+  const html = `
+    <main id="fakeMain" style="height:200px">
+      <div id="scrollList" style="overflow-y:auto;height:150px">
+        <div data-testid="conversation-turn-1"><div data-message-author-role="user">Hi</div></div>
+        <div data-testid="conversation-turn-2"><div data-message-author-role="assistant">Hello there, general kenobi.</div></div>
+      </div>
+    </main>
+    <textarea></textarea>
+  `;
+  const result = await run(html, {
+    fakeMain: { scrollHeight: 6725, clientHeight: 858 }, // tall, but NOT overflow:auto - must be skipped
+    scrollList: { scrollHeight: 1343, clientHeight: 844 }, // the real one
+  });
+  assert.equal(result.turns.length, 2, 'must still find both turns via the real scrollable container, not hang on the fake one');
+  assert.ok(result.turns[1].html.includes('general kenobi'));
+});
+
 test('real page title (no " - ChatGPT" suffix observed) and URL round-trip into the result', async () => {
   const html = `
     <div id="scrollList" style="overflow-y:auto;height:400px">
