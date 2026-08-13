@@ -1,13 +1,15 @@
-// Shared test harness: loads the real content.js into a jsdom window and
-// runs extractClaudeChat() against whatever HTML a test provides. Used by
-// every content.js test so the jsdom/vm setup boilerplate lives in one
-// place instead of being copy-pasted per test file.
+// Shared test harness: loads a real content-script adapter into a jsdom
+// window and runs its extraction IIFE against whatever HTML a test
+// provides. Originally built for content.js (Claude) only; parameterized
+// to also run chatgpt-content.js so both adapters' real jsdom/vm setup
+// boilerplate lives in one place instead of being duplicated per adapter.
 
 const { JSDOM } = require('jsdom');
 const fs = require('fs');
 const path = require('path');
 
 const CONTENT_JS_PATH = path.join(__dirname, '..', '..', 'content', 'content.js');
+const CHATGPT_CONTENT_JS_PATH = path.join(__dirname, '..', '..', 'content', 'chatgpt-content.js');
 
 /**
  * @param {string} bodyHtml - HTML to put in <body>. Must include a
@@ -20,9 +22,12 @@ const CONTENT_JS_PATH = path.join(__dirname, '..', '..', 'content', 'content.js'
  *   the live jsdom `window` right before extraction starts, for tests that
  *   need to schedule a delayed DOM mutation (e.g. flipping
  *   data-is-streaming) to prove extraction actually waits on it.
- * @returns {Promise<object>} the object extractClaudeChat() resolves to
+ * @param {string} [scriptPath] - which adapter file to run; defaults to
+ *   content.js (Claude). Pass CHATGPT_CONTENT_JS_PATH for the ChatGPT
+ *   adapter's tests.
+ * @returns {Promise<object>} the object the adapter's extraction IIFE resolves to
  */
-async function runExtraction(bodyHtml, sizes = {}, onReady) {
+async function runExtraction(bodyHtml, sizes = {}, onReady, scriptPath = CONTENT_JS_PATH) {
   const dom = new JSDOM(`<!doctype html><html><body>${bodyHtml}</body></html>`, {
     pretendToBeVisual: true,
     runScripts: 'outside-only',
@@ -55,7 +60,17 @@ async function runExtraction(bodyHtml, sizes = {}, onReady) {
     return real;
   };
 
-  const scriptSrc = fs.readFileSync(CONTENT_JS_PATH, 'utf8');
+  // jsdom does no layout at all, so it doesn't implement innerText (used by
+  // both adapters' extractCodeBlocks) - real Chrome supports it everywhere,
+  // this gap is test-environment-only. textContent is an exact stand-in for
+  // the code-block fixtures these tests use (real newline characters
+  // already present in the source, no hidden elements to differ on).
+  Object.defineProperty(window.HTMLElement.prototype, 'innerText', {
+    configurable: true,
+    get() { return this.textContent; },
+  });
+
+  const scriptSrc = fs.readFileSync(scriptPath, 'utf8');
   const run = new Function(
     'window', 'document', 'location', 'getComputedStyle', 'Node',
     `return (${scriptSrc.trim().replace(/^\uFEFF/, '').replace(/;$/, '')});`
@@ -64,4 +79,4 @@ async function runExtraction(bodyHtml, sizes = {}, onReady) {
   return run(window, window.document, window.location, window.getComputedStyle, window.Node);
 }
 
-module.exports = { runExtraction };
+module.exports = { runExtraction, CONTENT_JS_PATH, CHATGPT_CONTENT_JS_PATH };

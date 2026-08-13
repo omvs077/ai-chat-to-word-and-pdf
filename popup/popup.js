@@ -7,6 +7,7 @@
 
   let format = 'docx';
   let activeTabId = null;
+  let detectedPlatform = null; // 'claude' | 'chatgpt' | null
 
   segmentedOptions.forEach(btn => {
     btn.addEventListener('click', () => {
@@ -42,15 +43,23 @@
     try { hostname = new URL(tab.url).hostname; } catch (_) { /* non-http tab */ }
 
     if (hostname === 'claude.ai' || hostname.endsWith('.claude.ai')) {
+      detectedPlatform = 'claude';
       badge.textContent = 'claude.ai detected';
       badge.className = 'badge badge--on';
       exportBtn.disabled = false;
       setStatus('Ready. Click Export to save this conversation.');
+    } else if (hostname === 'chatgpt.com' || hostname.endsWith('.chatgpt.com')) {
+      detectedPlatform = 'chatgpt';
+      badge.textContent = 'chatgpt.com detected';
+      badge.className = 'badge badge--on';
+      exportBtn.disabled = false;
+      setStatus('Ready. Click Export to save this conversation.');
     } else {
-      badge.textContent = 'not on claude.ai';
+      detectedPlatform = null;
+      badge.textContent = 'unsupported page';
       badge.className = 'badge badge--off';
       exportBtn.disabled = true;
-      setStatus('Open a Claude chat, then click Export.');
+      setStatus('Open a Claude or ChatGPT chat, then click Export.');
     }
   }
 
@@ -74,12 +83,17 @@
     // Strips characters invalid in Windows/Mac/Linux filenames, collapses
     // whitespace, and caps length - keeps the real conversation title
     // usable as a filename without ever producing an unwritable path.
-    return (name || 'Claude Conversation')
+    // The 'Chat Export' fallback only ever fires if a content script's own
+    // title extraction somehow returns a falsy value, which content.js and
+    // chatgpt-content.js both guard against with their own platform-
+    // specific defaults already - this is a last-resort safety net, not
+    // the common path for either platform.
+    return (name || 'Chat Export')
       .replace(/[<>:"/\\|?*\x00-\x1F]/g, '')
       .replace(/\s+/g, ' ')
       .trim()
       .slice(0, 80)
-      .trim() || 'Claude Conversation';
+      .trim() || 'Chat Export';
   }
 
   async function runExport() {
@@ -92,9 +106,10 @@
       setStep('extract', 'is-active');
       setStatus('Extracting conversation from the page…');
 
+      const contentScriptFile = detectedPlatform === 'chatgpt' ? 'content/chatgpt-content.js' : 'content/content.js';
       const [{ result }] = await chrome.scripting.executeScript({
         target: { tabId: activeTabId },
-        files: ['content/content.js']
+        files: [contentScriptFile]
       });
 
       if (!result || result.error === 'NO_MESSAGES_FOUND') {
