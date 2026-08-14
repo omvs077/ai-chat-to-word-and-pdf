@@ -99,25 +99,39 @@
   // scrollHeight that can never change - confirmed as the exact cause of a
   // real "stuck at Extracting..., no visible scrolling" hang.
   //
-  // Fixed two ways: (1) a real, live-confirmed class fragment
-  // ("group/scrollport ... overflow-y-auto", scrollHeight 1343 vs
-  // clientHeight 844 when checked directly) is tried first; (2) the
-  // fallback walk now also requires genuine overflow-y:auto|scroll on the
-  // computed style, not just a height difference, so it can no longer
-  // false-positive on a merely-tall non-scrolling wrapper the way the
-  // original height-only check did.
+  // Fixed two ways: (1) prefers an ancestor whose class matches the real,
+  // live-confirmed fragment ("group/scrollport ... overflow-y-auto",
+  // scrollHeight 1343 vs clientHeight 844 when checked directly); (2)
+  // otherwise requires genuine overflow-y:auto|scroll on the computed
+  // style, not just a height difference, so it can no longer false-
+  // positive on a merely-tall non-scrolling wrapper like <main> the way
+  // the original height-only check did.
+  //
+  // Both checks walk UP FROM fromEl (the real message element) rather than
+  // doing a blind document.querySelector - a first attempt at fix (1) used
+  // a global query for the class fragment, which could (and on a real
+  // export, did) match a same-named but unrelated element elsewhere on the
+  // page - e.g. a sidebar region that happens to share the class fragment
+  // but doesn't contain the conversation at all. That produced a
+  // *different* real bug: detection correctly found all 7 messages
+  // (confirmed via the popup's own diagnostics), but the container.
+  // contains(el) filter silently dropped every one of them, since the
+  // "container" found wasn't actually an ancestor of any message. Walking
+  // up from fromEl makes it structurally impossible to return an unrelated
+  // element - whatever's found is guaranteed to actually contain fromEl.
   function findScrollContainer(fromEl) {
-    const knownScrollport = document.querySelector('[class*="scrollport" i]');
-    if (knownScrollport && knownScrollport.scrollHeight > knownScrollport.clientHeight) return knownScrollport;
-
+    let scrollportMatch = null;
     let el = fromEl;
     while (el && el !== document.body) {
+      if (!scrollportMatch && /scrollport/i.test(el.className || '') && el.scrollHeight > el.clientHeight) {
+        scrollportMatch = el;
+      }
       const style = getComputedStyle(el);
       const scrollable = style.overflowY === 'auto' || style.overflowY === 'scroll';
       if (scrollable && el.scrollHeight > el.clientHeight + 40) return el;
       el = el.parentElement;
     }
-    return document.scrollingElement || document.documentElement;
+    return scrollportMatch || document.scrollingElement || document.documentElement;
   }
 
   // ChatGPT's code blocks are CodeMirror-rendered but still a real pre>code

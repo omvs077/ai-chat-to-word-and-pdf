@@ -161,6 +161,45 @@ test('does not mistake a merely-tall non-scrolling wrapper for the real scroll c
   assert.ok(result.turns[1].html.includes('general kenobi'));
 });
 
+test('does not mistake an unrelated same-named "scrollport" element elsewhere on the page for the real container (regression)', async () => {
+  // Real bug found on the very next live export attempt after the fix
+  // above: a first attempt at fixing findScrollContainer used a blind
+  // document.querySelector('[class*="scrollport" i]') as a shortcut,
+  // trusting the real class fragment confirmed via live DevTools. That
+  // global query has no concept of ancestry - it can match (and on a real
+  // page with multiple similarly-classed regions, did match) an unrelated
+  // element elsewhere on the page that happens to share the class
+  // fragment but does not actually contain any conversation turns.
+  // Detection itself still correctly found all 7 real messages (confirmed
+  // via the popup's own diagnostics), but the container.contains(el)
+  // filter silently rejected every one of them since the "container"
+  // found wasn't an ancestor of any message - export failed fast with
+  // NO_MESSAGES_FOUND despite messages genuinely being present. The fix
+  // only accepts a scrollport-classed match found by walking UP from the
+  // real message element, which is structurally guaranteed to actually
+  // contain it.
+  const html = `
+    <div id="decoyScrollport" class="group/scrollport unrelated-sidebar-region" style="height:100px">
+      <div>Some unrelated sidebar content, not the conversation.</div>
+    </div>
+    <main id="fakeMain" style="height:200px">
+      <div id="scrollList" class="group/scrollport" style="overflow-y:auto;height:150px">
+        <div data-testid="conversation-turn-1"><div data-message-author-role="user">Hi</div></div>
+        <div data-testid="conversation-turn-2"><div data-message-author-role="assistant">Hello there, general kenobi.</div></div>
+      </div>
+    </main>
+    <textarea></textarea>
+  `;
+  const result = await run(html, {
+    decoyScrollport: { scrollHeight: 900, clientHeight: 100 }, // also "tall enough" - must NOT be picked
+    fakeMain: { scrollHeight: 6725, clientHeight: 858 },
+    scrollList: { scrollHeight: 1343, clientHeight: 844 }, // the real one, also containing the messages
+  });
+  assert.ok(!result.error, `must not fail with ${result.error} when real messages are present`);
+  assert.equal(result.turns.length, 2, 'must find both real turns via the real container, not the unrelated decoy');
+  assert.ok(result.turns[1].html.includes('general kenobi'));
+});
+
 test('real page title (no " - ChatGPT" suffix observed) and URL round-trip into the result', async () => {
   const html = `
     <div id="scrollList" style="overflow-y:auto;height:400px">

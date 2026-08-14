@@ -1,0 +1,27 @@
+Fix findScrollContainer matching an unrelated same-named element (round 2 of the same bug class)
+
+Real bug found on the very next live export attempt after the previous
+fix: export now failed fast with NO_MESSAGES_FOUND despite the popup's
+own diagnostics showing [data-message-author-role] correctly matched 7
+real messages. The previous fix's first check,
+document.querySelector('[class*="scrollport" i]'), is a blind global
+query with no concept of ancestry - on the real page it matched a
+same-named but unrelated element elsewhere (likely a sidebar region
+sharing the class fragment by coincidence), which doesn't actually
+contain any conversation turns. That wrong "container" got returned
+immediately, and the later container.contains(el) filter correctly, but
+uselessly, rejected all 7 real messages against it.
+
+Fix: only accept a scrollport-classed match found by walking UP from the
+real message element (fromEl) - structurally guaranteed to actually
+contain it, since it's found by ascending fromEl's own parent chain. No
+global query anywhere in this function anymore. The overflow-y:auto
+requirement from the previous fix is preserved unchanged.
+
+New regression test reconstructs the real shape: an unrelated decoy
+element sharing the "scrollport" class fragment (but not containing the
+conversation) alongside the real container that does. Confirmed via a
+real revert-and-rerun that this test fails against the previous fix's
+exact code, not just a hypothetical variant.
+
+Test suite: 39 -> 40 passing tests.
