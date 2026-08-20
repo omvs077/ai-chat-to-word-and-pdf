@@ -100,6 +100,26 @@ test('the real conversation title and export line round-trip correctly', async (
   assert.ok(xml.includes('You') && xml.includes('Claude'), 'both role labels must appear for a real two-turn conversation');
 });
 
+test('assistant role label uses ir.assistantName, not a hard-coded "Claude" (regression)', async () => {
+  // Real bug found on the first real ChatGPT export: the assistant role
+  // label was hard-coded as literally "Claude" regardless of which
+  // adapter produced the IR, so a genuine ChatGPT conversation still
+  // showed "Claude" as the label for every assistant turn.
+  const window = require('./helpers/docx-harness').loadWindow();
+  const ir = {
+    title: 'A ChatGPT Chat',
+    url: 'https://chatgpt.com/c/abc123',
+    exportedAt: new Date('2026-01-15T10:30:00Z').toISOString(),
+    assistantName: 'ChatGPT',
+    turns: [{ role: 'user', markdown: 'A question.' }, { role: 'assistant', markdown: 'An answer.' }],
+  };
+  const blob = await window.generateDocx(ir);
+  const buf = Buffer.from(await blob.arrayBuffer());
+  const xml = readDocxEntry(buf, 'word/document.xml');
+  assert.ok(xml.includes('ChatGPT'), 'the real assistant name must appear');
+  assert.ok(!xml.includes('>Claude<'), 'the hard-coded Claude label must not leak into a ChatGPT export');
+});
+
 // Real bugs found by generating and inspecting an actual export (a chat
 // with real web-search-sourced images): ImageRun hard-codes every embedded
 // image's media filename as <id>.png regardless of real format, which

@@ -429,6 +429,7 @@
     url: location.href,
     exportedAt: new Date().toISOString(),
     turns: ordered,
+    assistantName: 'Claude',
     _detectionMethods: methodsUsed
   };
 

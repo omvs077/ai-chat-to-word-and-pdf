@@ -6,6 +6,51 @@ function run(html, sizes, onReady) {
   return runExtraction(html, sizes, onReady, CHATGPT_CONTENT_JS_PATH);
 }
 
+// Turndown needs a DOMParser to parse HTML strings. Node's test runner runs
+// all *.test.js files in one process (see tests/run.js), so mutating
+// global.window/document/etc at module scope here would risk leaking into
+// other test files that also touch jsdom globals - this scopes the swap to
+// exactly the one test that needs Turndown, restoring afterward either way.
+function convertWithTurndown(html) {
+  const { JSDOM } = require('jsdom');
+  const dom = new JSDOM('<!doctype html><html><body></body></html>');
+  const saved = { window: global.window, document: global.document, DOMParser: global.DOMParser, Node: global.Node };
+  global.window = dom.window;
+  global.document = dom.window.document;
+  global.DOMParser = dom.window.DOMParser;
+  global.Node = dom.window.Node;
+  try {
+    delete require.cache[require.resolve('../lib/vendor/turndown.umd.js')];
+    const TurndownService = require('../lib/vendor/turndown.umd.js');
+    const turndown = new TurndownService({ headingStyle: 'atx', codeBlockStyle: 'fenced' });
+    return turndown.turndown(html);
+  } finally {
+    global.window = saved.window;
+    global.document = saved.document;
+    global.DOMParser = saved.DOMParser;
+    global.Node = saved.Node;
+  }
+}
+
+test('assistantName is "ChatGPT", not left as Claude\'s default (regression)', async () => {
+  // Real bug found on the first real generated export: both generators
+  // hard-coded the assistant role label as literally "Claude" regardless
+  // of which adapter produced the IR - a genuine ChatGPT export showed
+  // "Claude" as the label for every assistant turn. Both generators now
+  // read ir.assistantName (defaulting to 'Claude' only when absent, for
+  // content.js's own IR which doesn't set it... actually it does now too,
+  // see content.js's own result object).
+  const html = `
+    <div id="scrollList" style="overflow-y:auto;height:400px">
+      <div data-testid="conversation-turn-1"><div data-message-author-role="user">Hi</div></div>
+      <div data-testid="conversation-turn-2"><div data-message-author-role="assistant">Hello</div></div>
+    </div>
+    <textarea></textarea>
+  `;
+  const result = await run(html, { scrollList: { scrollHeight: 2000, clientHeight: 400 } });
+  assert.equal(result.assistantName, 'ChatGPT');
+});
+
 test('detects user and assistant turns via data-message-author-role', async () => {
   const html = `
     <div id="scrollList" style="overflow-y:auto;height:400px">
@@ -73,10 +118,22 @@ test('a real cited link survives extraction, with its citation-pill chip strippe
 // Real markup pasted directly from live DevTools inspection of an actual
 // ChatGPT-generated Python function - CodeMirror-rendered (confirmed via
 // the cm-content class and per-token <span> wrapping), not a plain-text
-// <pre><code> block the way Claude's are. Real newlines already exist
-// inside the source between spans, so .innerText reconstruction (same
-// technique content.js uses for Claude) should produce clean code text.
-test('a real CodeMirror-rendered code block extracts as clean, correctly-indented code', async () => {
+// <pre><code> block the way Claude's are.
+//
+// Real bug found on the first real generated export: leaving this
+// structure as-is in the captured HTML meant Turndown never recognized it
+// as a code block at all - the nested per-token <span> elements don't
+// match its default pre>code detection, so it fell through to plain
+// inline prose, backslash-escaping underscores/equals/brackets the way it
+// would for any regular text containing those characters. The real .docx
+// showed literal "def binary\_search(arr, target):" as one of many
+// separate plain paragraphs (one per original line), all indentation
+// lost. The fix normalizes the real <pre> into a clean, plain
+// <pre><code>text</code></pre> in the captured HTML - this test checks
+// both that normalization directly, and the full real Turndown conversion
+// end-to-end, since the intermediate HTML shape alone doesn't prove
+// Turndown actually handles it correctly.
+test('a real CodeMirror-rendered code block is normalized to a clean pre>code Turndown recognizes correctly', async () => {
   const codeBlock = `<pre class="cm-content q9tKkq_readonly m-0"><code><span class="ͼv">def</span><span> </span><span class="ͼ11">binary_search</span><span>(</span><span class="ͼ11">arr</span><span>, </span><span class="ͼ11">target</span><span>):
     </span><span class="ͼ11">left</span><span>, </span><span class="ͼ11">right</span><span> </span><span class="ͼv">=</span><span> </span><span class="ͼy">0</span><span>, </span><span class="ͼ11">len</span><span>(</span><span class="ͼ11">arr</span><span>) </span><span class="ͼv">-</span><span> </span><span class="ͼy">1</span><span>
     </span><span class="ͼv">while</span><span> </span><span class="ͼ11">left</span><span> </span><span class="ͼv">&lt;=</span><span> </span><span class="ͼ11">right</span><span>:
@@ -98,12 +155,17 @@ test('a real CodeMirror-rendered code block extracts as clean, correctly-indente
   `;
   const result = await run(html, { scrollList: { scrollHeight: 2000, clientHeight: 400 } });
   const assistant = result.turns.find(t => t.role === 'assistant');
-  assert.equal(assistant.codeBlocks.length, 1);
-  const code = assistant.codeBlocks[0].code;
-  assert.ok(code.includes('def binary_search(arr, target):'));
-  assert.ok(code.includes('    left, right = 0, len(arr) - 1'), 'indentation must survive');
-  assert.ok(code.includes('        if arr[mid] == target:'), 'nested indentation must survive');
-  assert.ok(code.includes('    return -1'), 'the last line must survive with no trailing artifacts');
+
+  assert.ok(!assistant.html.includes('ͼ'), 'no CodeMirror token spans may survive into the captured HTML');
+  assert.ok(/<pre><code[^>]*>/.test(assistant.html), 'must be a clean, plain pre>code Turndown recognizes by default');
+  assert.ok(assistant.html.includes('def binary_search(arr, target):'));
+  assert.ok(assistant.html.includes('    left, right = 0, len(arr) - 1'), 'indentation must survive as real whitespace, not escaped');
+
+  const turndownMarkdown = convertWithTurndown(assistant.html);
+  assert.ok(turndownMarkdown.includes('```'), 'must become a real fenced code block, not escaped plain paragraphs');
+  assert.ok(turndownMarkdown.includes('def binary_search(arr, target):'));
+  assert.ok(!turndownMarkdown.includes('binary\\_search'), 'must NOT be markdown-escaped the way plain-prose underscores would be');
+  assert.ok(!turndownMarkdown.includes('mid \\='), 'must NOT be markdown-escaped the way plain-prose equals signs would be');
 });
 
 test('returns NO_MESSAGES_FOUND with diagnostics when nothing resembling a message exists', async () => {

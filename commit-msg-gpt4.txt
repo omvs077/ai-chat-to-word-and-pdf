@@ -1,0 +1,61 @@
+Fix hard-coded "Claude" label and ChatGPT code-block escaping (from the first real ChatGPT export)
+
+Both bugs found by generating and inspecting an actual ChatGPT export
+end-to-end for the first time (extraction itself now works after the two
+prior scroll-container fixes).
+
+1. Assistant role label was hard-coded as literally "Claude" in both
+   generators (lib/docx-generator.js, lib/pdf-generator.js), regardless of
+   which adapter produced the IR - a genuine ChatGPT export still showed
+   "Claude" as the label for every assistant turn. Both content scripts
+   now set assistantName on the result object ('Claude' for content.js,
+   'ChatGPT' for chatgpt-content.js), and both generators read
+   ir.assistantName (defaulting to 'Claude' only when absent, so nothing
+   changes for any other caller).
+
+2. ChatGPT's code blocks were unreadable in the real export: literal
+   "def binary\_search(arr, target):" as one of many separate plain
+   paragraphs, all indentation lost. Root cause: chatgpt-content.js
+   extracted clean code text into a separate `codeBlocks` array that nothing
+   downstream ever consumed - the same class of gap Claude's t.images
+   once had - while leaving the real CodeMirror structure (<pre
+   class="cm-content"><code><span>...per-token spans...) untouched in the
+   captured HTML. Turndown's default pre>code detection doesn't recognize
+   that shape, so it fell through to treating everything as plain inline
+   prose, backslash-escaping underscores/equals/brackets the way it would
+   for any regular text containing those characters.
+
+   Fix: normalizeCodeBlocks() now replaces each real <pre> in the CLONE
+   with a clean <pre><code>text</code></pre> Turndown's own default
+   handling already recognizes correctly (matching how Claude's plain code
+   blocks work, no separate array needed - removed the now-dead
+   `codeBlocks` field entirely). Text is read from the LIVE <pre> elements
+   via .innerText before cloning, not from the clone itself - a cloned,
+   detached node has no layout in a real browser, so .innerText on it
+   would be unreliable.
+
+   Verified end-to-end: normalized HTML confirmed clean, then run through
+   the real vendored Turndown library directly, confirming a genuine
+   ```-fenced code block with no escaping - not just an intermediate HTML
+   shape check.
+
+Two more real, confirmed findings from the same export, deliberately NOT
+fixed this round since I don't have real DOM confirmation for either -
+flagging clearly rather than guessing blind:
+  - An assistant turn whose entire content is a single generated image
+    (no text at all) is missing from the export entirely - not even an
+    empty turn, the role label itself never appears. Root cause unconfirmed;
+    likely tangled up with the already-deferred image-handling scope
+    (v1 has no logic for an image-only turn at all) rather than an
+    independent bug, but this needs live DevTools inspection to know for
+    sure, not more guessing from the exported file alone.
+  - Three links (Python Documentation / MDN Web Docs / freeCodeCamp,
+    rendered bold in ChatGPT's UI rather than the underlined-blue style)
+    were lost entirely - no <w:hyperlink> at all, unlike an earlier
+    "Official Python downloads" link in the same conversation which
+    survived correctly. Likely a different underlying element/rendering
+    pattern than the plain <a href> citation link already confirmed and
+    handled - genuinely unconfirmed without real DOM inspection of this
+    specific link style.
+
+Test suite: 40 -> 43 passing tests.

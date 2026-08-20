@@ -140,15 +140,45 @@
   // token spans, so .innerText reconstructs correctly the same way it does
   // for Claude's plain <pre><code> blocks. No language-xxx class was
   // observed on the <code> element itself; falls back to the preceding-
-  // sibling label heuristic already proven for Claude, unverified here
-  // pending a real generated-export check.
-  function extractCodeBlocks(el) {
-    return Array.from(el.querySelectorAll('pre')).map(pre => {
-      const codeEl = pre.querySelector('code');
+  // sibling label heuristic already proven for Claude.
+  //
+  // Confirmed via a real generated export: leaving the real CodeMirror
+  // structure as-is in the captured HTML (an earlier version of this
+  // function only extracted the clean text into a separate `codeBlocks`
+  // array, never wired into anything downstream - the same class of dead-
+  // code gap Claude's t.images once had) meant Turndown never recognized
+  // it as a code block at all - the nested per-token <span> elements don't
+  // match its default pre>code detection, so it fell through to treating
+  // everything as plain inline prose, backslash-escaping underscores/
+  // equals/brackets the way it would for any regular text containing
+  // those characters. The real .docx showed literal "def binary\_search"
+  // etc., one line per separate paragraph, all indentation lost. The fix
+  // replaces each real <pre> in the CLONE with a clean, plain
+  // <pre><code>text</code></pre> Turndown's own default handling already
+  // recognizes correctly (matching how Claude's plain code blocks work,
+  // with no separate array needed).
+  //
+  // liveEl (not the clone) is read for .innerText - a cloned, detached
+  // node has no layout at all in a real browser, so .innerText on it is
+  // unreliable; the live element is still attached and rendered at the
+  // moment this runs, before cloning discards that.
+  function normalizeCodeBlocks(liveEl, clone) {
+    const livePres = Array.from(liveEl.querySelectorAll('pre'));
+    const clonePres = Array.from(clone.querySelectorAll('pre'));
+    livePres.forEach((livePre, i) => {
+      const clonePre = clonePres[i];
+      if (!clonePre) return;
+      const codeEl = livePre.querySelector('code');
       const langMatch = codeEl && codeEl.className.match(/language-(\S+)/);
-      const labelEl = pre.previousElementSibling;
+      const labelEl = livePre.previousElementSibling;
       const label = langMatch ? langMatch[1] : (labelEl && labelEl.textContent.trim().length < 20 ? labelEl.textContent.trim() : '');
-      return { language: label || 'text', code: (codeEl || pre).innerText.replace(/\n$/, '') };
+      const plainText = (codeEl || livePre).innerText.replace(/\n$/, '');
+      const newPre = document.createElement('pre');
+      const newCode = document.createElement('code');
+      if (label) newCode.className = `language-${label}`;
+      newCode.textContent = plainText;
+      newPre.appendChild(newCode);
+      clonePre.replaceWith(newPre);
     });
   }
 
@@ -192,11 +222,11 @@
       STRIP_SELECTORS.forEach(sel => {
         clone.querySelectorAll(sel).forEach(n => n.remove());
       });
+      normalizeCodeBlocks(el, clone);
       const idx = turnIndexFor(el);
       collected.set(key, {
         role,
         html: clone.innerHTML,
-        codeBlocks: extractCodeBlocks(el),
         images: [], // deferred - see file header
         artifacts: [], // deferred - see file header
         toolUses: [], // deferred - see file header
@@ -268,6 +298,7 @@
     url: location.href,
     exportedAt: new Date().toISOString(),
     turns: ordered,
+    assistantName: 'ChatGPT',
     _detectionMethods: methodsUsed
   };
 

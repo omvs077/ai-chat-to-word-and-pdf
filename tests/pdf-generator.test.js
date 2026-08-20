@@ -1,7 +1,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const pdfParse = require('pdf-parse');
-const { generateFor } = require('./helpers/pdf-harness');
+const { generateFor, loadWindow } = require('./helpers/pdf-harness');
 
 // jsPDF's built-in fonts only support WinAnsi encoding. Before the fix, any
 // character outside that corrupted the ENTIRE paragraph it was in - not
@@ -98,4 +98,24 @@ test('markdown link inside a list item also becomes a real clickable PDF annotat
   const raw = buf.toString('latin1');
   assert.ok(/\/Subtype\s*\/Link/.test(raw), 'list items must get real link annotations too');
   assert.ok(raw.includes('example.com/list-target'));
+});
+
+test('assistant role label uses ir.assistantName, not a hard-coded "Claude" (regression)', async () => {
+  // Real bug found on the first real ChatGPT export: the assistant role
+  // label was hard-coded as literally "Claude" regardless of which
+  // adapter produced the IR, so a genuine ChatGPT conversation still
+  // showed "Claude" as the label for every assistant turn.
+  const window = loadWindow();
+  const ir = {
+    title: 'A ChatGPT Chat',
+    url: 'https://chatgpt.com/c/abc123',
+    exportedAt: new Date().toISOString(),
+    assistantName: 'ChatGPT',
+    turns: [{ role: 'user', markdown: 'A question.' }, { role: 'assistant', markdown: 'An answer.' }],
+  };
+  const blob = await window.generatePdf(ir);
+  const buf = Buffer.from(await blob.arrayBuffer());
+  const { text } = await pdfParse(buf);
+  assert.ok(text.includes('ChatGPT'), 'the real assistant name must appear');
+  assert.ok(!text.includes('Claude'), 'the hard-coded Claude label must not leak into a ChatGPT export');
 });
