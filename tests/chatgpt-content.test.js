@@ -115,36 +115,63 @@ test('a real cited link survives extraction, with its citation-pill chip strippe
   assert.ok(!assistant.html.includes('utm_source=chatgpt.com'), 'the tracking-decorated duplicate URL must not leak in');
 });
 
-// Real markup pasted directly from live DevTools inspection of an actual
-// ChatGPT-generated Python function - CodeMirror-rendered (confirmed via
-// the cm-content class and per-token <span> wrapping), not a plain-text
-// <pre><code> block the way Claude's are.
+// Real markup captured via live DevTools inspection of an actual ChatGPT-
+// generated Python function - CodeMirror-rendered as a <div class="cm-
+// content" data-language="python"> with one <div class="cm-line"> per
+// source line (a blank line is <div class="cm-line"><br></div>), NOT a
+// plain <pre><code> pair.
 //
 // Real bug found on the first real generated export: leaving this
 // structure as-is in the captured HTML meant Turndown never recognized it
-// as a code block at all - the nested per-token <span> elements don't
-// match its default pre>code detection, so it fell through to plain
-// inline prose, backslash-escaping underscores/equals/brackets the way it
-// would for any regular text containing those characters. The real .docx
-// showed literal "def binary\_search(arr, target):" as one of many
-// separate plain paragraphs (one per original line), all indentation
-// lost. The fix normalizes the real <pre> into a clean, plain
-// <pre><code>text</code></pre> in the captured HTML - this test checks
-// both that normalization directly, and the full real Turndown conversion
-// end-to-end, since the intermediate HTML shape alone doesn't prove
-// Turndown actually handles it correctly.
-test('a real CodeMirror-rendered code block is normalized to a clean pre>code Turndown recognizes correctly', async () => {
+// as a code block at all - block-level divs with no matching rule fall
+// through to plain inline prose, backslash-escaping underscores/equals/
+// brackets the way it would for any regular text containing those
+// characters. The real .docx showed literal "def binary\_search(arr,
+// target):" as one of many separate plain paragraphs, all indentation
+// lost. A first fix attempt only handled a DIFFERENT real CodeMirror shape
+// (<pre class="cm-content"><code><span>...</span></code></pre>, seen in an
+// earlier live inspection this session) - since that shape uses <pre>, not
+// <div class="cm-content">, the fix's own querySelectorAll('pre') matched
+// nothing on this real structure and silently did nothing. This test
+// checks the actual live structure, both the normalization directly and
+// the full real Turndown conversion end-to-end, since the intermediate
+// HTML shape alone doesn't prove Turndown actually handles it correctly.
+test('a real div/cm-line CodeMirror code block is normalized to a clean pre>code Turndown recognizes correctly', async () => {
+  const codeBlock = `<div spellcheck="false" autocorrect="off" autocapitalize="off" writingsuggestions="false" translate="no" contenteditable="false" style="tab-size: 4;" class="cm-content" role="textbox" aria-multiline="true" aria-readonly="true" aria-label="Edit code" data-language="python"><div class="cm-line"><span class="ͼv">def</span> <span class="ͼ11">binary_search</span>(<span class="ͼ11">arr</span>, <span class="ͼ11">target</span>):</div><div class="cm-line">    <span class="ͼ11">left</span>, <span class="ͼ11">right</span> <span class="ͼv">=</span> <span class="ͼy">0</span>, <span class="ͼ11">len</span>(<span class="ͼ11">arr</span>) <span class="ͼv">-</span> <span class="ͼy">1</span></div><div class="cm-line"><br></div><div class="cm-line">    <span class="ͼv">while</span> <span class="ͼ11">left</span> <span class="ͼv">&lt;=</span> <span class="ͼ11">right</span>:</div><div class="cm-line">        <span class="ͼ11">mid</span> <span class="ͼv">=</span> (<span class="ͼ11">left</span> <span class="ͼv">+</span> <span class="ͼ11">right</span>) <span class="ͼv">//</span> <span class="ͼy">2</span></div><div class="cm-line"><br></div><div class="cm-line">        <span class="ͼv">if</span> <span class="ͼ11">arr</span>[<span class="ͼ11">mid</span>] <span class="ͼv">==</span> <span class="ͼ11">target</span>:</div><div class="cm-line">            <span class="ͼv">return</span> <span class="ͼ11">mid</span></div><div class="cm-line">        <span class="ͼv">elif</span> <span class="ͼ11">arr</span>[<span class="ͼ11">mid</span>] <span class="ͼv">&lt;</span> <span class="ͼ11">target</span>:</div><div class="cm-line">            <span class="ͼ11">left</span> <span class="ͼv">=</span> <span class="ͼ11">mid</span> <span class="ͼv">+</span> <span class="ͼy">1</span></div><div class="cm-line">        <span class="ͼv">else</span>:</div><div class="cm-line">            <span class="ͼ11">right</span> <span class="ͼv">=</span> <span class="ͼ11">mid</span> <span class="ͼv">-</span> <span class="ͼy">1</span></div><div class="cm-line"><br></div><div class="cm-line">    <span class="ͼv">return</span> <span class="ͼv">-</span><span class="ͼy">1</span></div></div>`;
+  const html = `
+    <div id="scrollList" style="overflow-y:auto;height:400px">
+      <div data-testid="conversation-turn-1"><div data-message-author-role="user">Write binary search.</div></div>
+      <div data-testid="conversation-turn-2"><div data-message-author-role="assistant">Here is the function:${codeBlock}</div></div>
+    </div>
+    <textarea></textarea>
+  `;
+  const result = await run(html, { scrollList: { scrollHeight: 2000, clientHeight: 400 } });
+  const assistant = result.turns.find(t => t.role === 'assistant');
+
+  assert.ok(!assistant.html.includes('cm-line'), 'no real cm-line divs may survive into the captured HTML');
+  assert.ok(!assistant.html.includes('ͼ'), 'no CodeMirror token spans may survive into the captured HTML');
+  assert.ok(/<pre><code class="language-python">/.test(assistant.html), 'must be a clean pre>code with the real data-language picked up directly');
+  assert.ok(assistant.html.includes('def binary_search(arr, target):'));
+  assert.ok(assistant.html.includes('    left, right = 0, len(arr) - 1'), 'indentation must survive as real whitespace, not escaped');
+
+  const turndownMarkdown = convertWithTurndown(assistant.html);
+  assert.ok(turndownMarkdown.includes('```python'), 'must become a real fenced code block with the language tag, not escaped plain paragraphs');
+  assert.ok(turndownMarkdown.includes('def binary_search(arr, target):'));
+  assert.ok(!turndownMarkdown.includes('binary\\_search'), 'must NOT be markdown-escaped the way plain-prose underscores would be');
+  assert.ok(!turndownMarkdown.includes('mid \\='), 'must NOT be markdown-escaped the way plain-prose equals signs would be');
+});
+
+// The other real CodeMirror shape confirmed via live DevTools this
+// session (<pre class="cm-content"><code><span>...per-token spans...>) -
+// possibly a different rendering mode/state than the div/cm-line shape
+// above, or the structure changed between sessions. Kept as its own test
+// since normalizeCodeBlocks explicitly supports both as a fallback.
+test('the other real (pre-based) CodeMirror shape also normalizes correctly', async () => {
   const codeBlock = `<pre class="cm-content q9tKkq_readonly m-0"><code><span class="ͼv">def</span><span> </span><span class="ͼ11">binary_search</span><span>(</span><span class="ͼ11">arr</span><span>, </span><span class="ͼ11">target</span><span>):
     </span><span class="ͼ11">left</span><span>, </span><span class="ͼ11">right</span><span> </span><span class="ͼv">=</span><span> </span><span class="ͼy">0</span><span>, </span><span class="ͼ11">len</span><span>(</span><span class="ͼ11">arr</span><span>) </span><span class="ͼv">-</span><span> </span><span class="ͼy">1</span><span>
     </span><span class="ͼv">while</span><span> </span><span class="ͼ11">left</span><span> </span><span class="ͼv">&lt;=</span><span> </span><span class="ͼ11">right</span><span>:
         </span><span class="ͼ11">mid</span><span> </span><span class="ͼv">=</span><span> (</span><span class="ͼ11">left</span><span> </span><span class="ͼv">+</span><span> </span><span class="ͼ11">right</span><span>) </span><span class="ͼv">//</span><span> </span><span class="ͼy">2</span><span>
-        </span><span class="ͼv">if</span><span> </span><span class="ͼ11">arr</span><span>[</span><span class="ͼ11">mid</span><span>] </span><span class="ͼv">==</span><span> </span><span class="ͼ11">target</span><span>:
-            </span><span class="ͼv">return</span><span> </span><span class="ͼ11">mid</span><span>
-        </span><span class="ͼv">elif</span><span> </span><span class="ͼ11">arr</span><span>[</span><span class="ͼ11">mid</span><span>] </span><span class="ͼv">&lt;</span><span> </span><span class="ͼ11">target</span><span>:
-            </span><span class="ͼ11">left</span><span> </span><span class="ͼv">=</span><span> </span><span class="ͼ11">mid</span><span> </span><span class="ͼv">+</span><span> </span><span class="ͼy">1</span><span>
-        </span><span class="ͼv">else</span><span>:
-            </span><span class="ͼ11">right</span><span> </span><span class="ͼv">=</span><span> </span><span class="ͼ11">mid</span><span> </span><span class="ͼv">-</span><span> </span><span class="ͼy">1</span><span>
-    </span><span class="ͼv">return</span><span> </span><span class="ͼv">-</span><span class="ͼy">1</span></code></pre>
+        </span><span class="ͼv">return</span><span> </span><span class="ͼv">-</span><span class="ͼy">1</span></code></pre>
 `;
   const html = `
     <div id="scrollList" style="overflow-y:auto;height:400px">
@@ -159,13 +186,10 @@ test('a real CodeMirror-rendered code block is normalized to a clean pre>code Tu
   assert.ok(!assistant.html.includes('ͼ'), 'no CodeMirror token spans may survive into the captured HTML');
   assert.ok(/<pre><code[^>]*>/.test(assistant.html), 'must be a clean, plain pre>code Turndown recognizes by default');
   assert.ok(assistant.html.includes('def binary_search(arr, target):'));
-  assert.ok(assistant.html.includes('    left, right = 0, len(arr) - 1'), 'indentation must survive as real whitespace, not escaped');
 
   const turndownMarkdown = convertWithTurndown(assistant.html);
   assert.ok(turndownMarkdown.includes('```'), 'must become a real fenced code block, not escaped plain paragraphs');
-  assert.ok(turndownMarkdown.includes('def binary_search(arr, target):'));
   assert.ok(!turndownMarkdown.includes('binary\\_search'), 'must NOT be markdown-escaped the way plain-prose underscores would be');
-  assert.ok(!turndownMarkdown.includes('mid \\='), 'must NOT be markdown-escaped the way plain-prose equals signs would be');
 });
 
 test('returns NO_MESSAGES_FOUND with diagnostics when nothing resembling a message exists', async () => {

@@ -134,51 +134,61 @@
     return scrollportMatch || document.scrollingElement || document.documentElement;
   }
 
-  // ChatGPT's code blocks are CodeMirror-rendered but still a real pre>code
-  // pair (confirmed via live DevTools: <pre class="cm-content ..."><code>
-  // <span>...</span>...</code></pre>) - real newlines exist inside the
-  // token spans, so .innerText reconstructs correctly the same way it does
-  // for Claude's plain <pre><code> blocks. No language-xxx class was
-  // observed on the <code> element itself; falls back to the preceding-
-  // sibling label heuristic already proven for Claude.
+  // ChatGPT's code blocks are CodeMirror-rendered. Two distinct real
+  // structures have been directly confirmed via live DevTools at different
+  // points on the same live page - both handled here, neither guessed:
+  //   (a) <div class="cm-content" data-language="python"><div class="cm-line">
+  //       ...</div>...</div> - one div per source line; a blank line is
+  //       <div class="cm-line"><br></div>. This is the structure actually
+  //       causing the real corruption confirmed in a generated export
+  //       ("def binary\_search" as literal escaped text, one line per
+  //       separate paragraph, indentation lost) - a first fix attempt only
+  //       handled shape (b) below, which doesn't match this at all, so it
+  //       silently matched nothing on the real page and did nothing.
+  //   (b) <pre class="cm-content"><code><span>...per-token spans...</span>
+  //       </code></pre> - seen in an earlier live inspection this session.
+  //       Possibly a different rendering mode/state, or the structure
+  //       changed between sessions - kept as a fallback since it's equally
+  //       real, not speculative.
+  // .textContent is used throughout, not .innerText - the original sample's
+  // newlines are literal \n text characters already present in the DOM
+  // (not CSS-rendered line breaks), so .textContent reconstructs them
+  // identically with no layout/attachment dependency - this can operate
+  // purely on the clone, no live element needed.
   //
-  // Confirmed via a real generated export: leaving the real CodeMirror
-  // structure as-is in the captured HTML (an earlier version of this
-  // function only extracted the clean text into a separate `codeBlocks`
-  // array, never wired into anything downstream - the same class of dead-
-  // code gap Claude's t.images once had) meant Turndown never recognized
-  // it as a code block at all - the nested per-token <span> elements don't
-  // match its default pre>code detection, so it fell through to treating
-  // everything as plain inline prose, backslash-escaping underscores/
-  // equals/brackets the way it would for any regular text containing
-  // those characters. The real .docx showed literal "def binary\_search"
-  // etc., one line per separate paragraph, all indentation lost. The fix
-  // replaces each real <pre> in the CLONE with a clean, plain
-  // <pre><code>text</code></pre> Turndown's own default handling already
-  // recognizes correctly (matching how Claude's plain code blocks work,
-  // with no separate array needed).
-  //
-  // liveEl (not the clone) is read for .innerText - a cloned, detached
-  // node has no layout at all in a real browser, so .innerText on it is
-  // unreliable; the live element is still attached and rendered at the
-  // moment this runs, before cloning discards that.
-  function normalizeCodeBlocks(liveEl, clone) {
-    const livePres = Array.from(liveEl.querySelectorAll('pre'));
-    const clonePres = Array.from(clone.querySelectorAll('pre'));
-    livePres.forEach((livePre, i) => {
-      const clonePre = clonePres[i];
-      if (!clonePre) return;
-      const codeEl = livePre.querySelector('code');
-      const langMatch = codeEl && codeEl.className.match(/language-(\S+)/);
-      const labelEl = livePre.previousElementSibling;
-      const label = langMatch ? langMatch[1] : (labelEl && labelEl.textContent.trim().length < 20 ? labelEl.textContent.trim() : '');
-      const plainText = (codeEl || livePre).innerText.replace(/\n$/, '');
+  // NOT yet handled: a language-label header ("Python") and a "Run" button
+  // that sit as siblings near the code block still leak into the captured
+  // HTML as plain text (visible in a real export as literal "Python" /
+  // "Run" lines before the code). Their real wrapper markup hasn't been
+  // confirmed via live inspection yet, so no strip selector is guessed
+  // here - this is a known, deliberate gap, not an oversight.
+  function normalizeCodeBlocks(clone) {
+    clone.querySelectorAll('.cm-content').forEach(cm => {
+      const lineEls = cm.querySelectorAll(':scope > .cm-line');
+      if (!lineEls.length) return; // not this shape - e.g. a <pre class="cm-content"> from the other real structure, handled below
+      const lines = Array.from(lineEls).map(line => line.textContent);
+      const codeText = lines.join('\n');
+      const label = cm.getAttribute('data-language') || '';
       const newPre = document.createElement('pre');
       const newCode = document.createElement('code');
       if (label) newCode.className = `language-${label}`;
-      newCode.textContent = plainText;
+      newCode.textContent = codeText;
       newPre.appendChild(newCode);
-      clonePre.replaceWith(newPre);
+      cm.replaceWith(newPre);
+    });
+
+    clone.querySelectorAll('pre').forEach(pre => {
+      const codeEl = pre.querySelector('code');
+      if (!codeEl || !codeEl.querySelector('span')) return; // already plain (or already normalized above), nothing to do
+      const langMatch = codeEl.className.match(/language-(\S+)/);
+      const label = langMatch ? langMatch[1] : '';
+      const codeText = codeEl.textContent.replace(/\n$/, '');
+      const newPre = document.createElement('pre');
+      const newCode = document.createElement('code');
+      if (label) newCode.className = `language-${label}`;
+      newCode.textContent = codeText;
+      newPre.appendChild(newCode);
+      pre.replaceWith(newPre);
     });
   }
 
@@ -222,7 +232,7 @@
       STRIP_SELECTORS.forEach(sel => {
         clone.querySelectorAll(sel).forEach(n => n.remove());
       });
-      normalizeCodeBlocks(el, clone);
+      normalizeCodeBlocks(clone);
       const idx = turnIndexFor(el);
       collected.set(key, {
         role,

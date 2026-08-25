@@ -55,6 +55,23 @@ test('a markdown link becomes a real ExternalHyperlink relationship, not flatten
   assert.ok(rels.includes('anthropic.com'), 'the relationships part must contain the real target URL');
 });
 
+test('a bold-styled markdown link ("**[text](url)**") still becomes a real hyperlink (regression)', async () => {
+  // Real bug found on a real ChatGPT export: three real links (Python
+  // Documentation / MDN Web Docs / freeCodeCamp), each an entire **bold**
+  // span wrapping nothing but a link - ChatGPT renders cited-source links
+  // this way, as opposed to the plain, unstyled link style that already
+  // worked correctly. parseInlineRuns captured the outer ** as bold but
+  // never re-parsed the inner "[text](url)" content, so the link was
+  // silently dropped entirely - the visible text rendered, but as plain
+  // bold text with no hyperlink relationship at all.
+  const buf = await generateFor('**[Python Documentation](https://docs.python.org/3/)** is the official reference.');
+  const xml = readDocxEntry(buf, 'word/document.xml');
+  const rels = readDocxEntry(buf, 'word/_rels/document.xml.rels');
+  assert.ok(xml.includes('Python Documentation'), 'the visible link label must render');
+  assert.ok(xml.includes('hyperlink'), 'document.xml must reference a real hyperlink relationship, not just bold text');
+  assert.ok(rels.includes('docs.python.org'), 'the relationships part must contain the real target URL');
+});
+
 test('an embedded image produces a real, byte-identical media file', async () => {
   const dataUrl = `data:image/png;base64,${RED_PIXEL_PNG_B64}`;
   const alt = 'a red pixel\u241F50x50'; // \u241F-delimited dims, matches content.js's real encoding

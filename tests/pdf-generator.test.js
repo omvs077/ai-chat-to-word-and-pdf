@@ -93,6 +93,19 @@ test('markdown link in a paragraph becomes a real clickable PDF annotation', asy
   assert.ok(!text.includes('(https://www.anthropic.com/)'), 'must NOT fall back to the old flattened "label (url)" text');
 });
 
+test('a bold-styled markdown link ("**[text](url)**") still becomes a real clickable PDF annotation (regression)', async () => {
+  // Same real bug as the docx-generator.test.js companion test: an entire
+  // **bold** span wrapping nothing but a link (ChatGPT's real cited-source
+  // link style) previously lost the link entirely in parseInlineRuns,
+  // shared by both generators.
+  const buf = await generateFor('**[Python Documentation](https://docs.python.org/3/)** is the official reference.');
+  const raw = buf.toString('latin1');
+  assert.ok(/\/Subtype\s*\/Link/.test(raw), 'must contain a real PDF link annotation, not just bold text');
+  assert.ok(raw.includes('docs.python.org'), 'the URL must be embedded in a /URI entry');
+  const { text } = await pdfParse(buf);
+  assert.ok(text.includes('Python Documentation'), 'the visible link label must still render');
+});
+
 test('markdown link inside a list item also becomes a real clickable PDF annotation', async () => {
   const buf = await generateFor('- An item with a [link](https://example.com/list-target) inside it');
   const raw = buf.toString('latin1');
