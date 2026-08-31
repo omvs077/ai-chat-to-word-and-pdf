@@ -13,6 +13,20 @@
 //     structurally still a real pre>code pair)
 //   - scroll-and-collect for virtualized turns (same challenge as Claude)
 //
+// FIXED this session: an image-only assistant turn (no accompanying text -
+// e.g. a bare "generate an image of X" prompt) used to vanish from the
+// export entirely, including its own "ChatGPT said:" role label. Root
+// cause (confirmed via live DevTools): such a turn carries NO
+// data-message-author-role anywhere in its subtree - only data-turn=
+// "assistant" on the conversation-turn-N wrapper - so the sole discovery
+// selector at the time never matched it. detectTurnNodes() now merges in
+// a supplemental match for this shape unconditionally (see
+// IMAGE_ONLY_ASSISTANT). The real <img> (after stripping 2 real,
+// confirmed aria-hidden="true" decorative duplicate <img> layers) is
+// replaced with a plain-text `[alt text]` placeholder via
+// normalizeImages() - actual image EMBEDDING is still not built (see
+// below), this only fixed the turn's visibility.
+//
 // Deliberately DEFERRED, not silently guessed at:
 //   - image embedding (uploaded/generated images are same-origin
 //     chatgpt.com/backend-api/... URLs, which is promising, but untested;
@@ -73,11 +87,37 @@
     return nodes.filter((n, i) => !nodes.some((m, j) => i !== j && n.contains(m)));
   }
 
+  // Confirmed via live DevTools: an image-only assistant turn (e.g. a bare
+  // "generate an image of X" prompt with no accompanying text) carries NO
+  // data-message-author-role anywhere in its subtree at all - tier 1 misses
+  // it completely, not as an empty match but as a fully absent one, which
+  // is why the whole turn (including the "ChatGPT said:" label) vanished
+  // from every export. The turn's own outer <section> instead carries
+  // data-turn="assistant" alongside the same data-testid="conversation-
+  // turn-N" attribute normal turns have. This selector is checked
+  // unconditionally, merged into assistantNodes regardless of whether tier
+  // 1 otherwise "succeeded" - a normal conversation always has other, real
+  // data-message-author-role turns, so tier 1 returns early on its own and
+  // an image-only turn would never get a chance to be found as a fallback.
+  const IMAGE_ONLY_ASSISTANT = '[data-testid^="conversation-turn-"][data-turn="assistant"]';
+
   function detectTurnNodes() {
     const all = Array.from(document.querySelectorAll(TIER1_MESSAGE));
     tried.push(`${TIER1_MESSAGE} -> ${all.length}`);
     const userNodes = all.filter(el => el.getAttribute('data-message-author-role') === 'user');
     const assistantNodes = all.filter(el => el.getAttribute('data-message-author-role') === 'assistant');
+
+    const imageOnlyNodes = Array.from(document.querySelectorAll(IMAGE_ONLY_ASSISTANT))
+      .filter(el => !el.hasAttribute('data-message-author-role') && !el.querySelector('[data-message-author-role]'));
+    tried.push(`${IMAGE_ONLY_ASSISTANT} (image-only supplement) -> ${imageOnlyNodes.length}`);
+    const knownIdx = new Set(assistantNodes.map(el => turnIndexFor(el)));
+    for (const el of imageOnlyNodes) {
+      const idx = turnIndexFor(el);
+      if (idx !== null && knownIdx.has(idx)) continue;
+      assistantNodes.push(el);
+      if (idx !== null) knownIdx.add(idx);
+    }
+
     if (userNodes.length && assistantNodes.length) return { userNodes, assistantNodes, method: 'tier1-author-role' };
 
     const u2 = dropAncestors(uniqueMatches(TIER2_USER));
@@ -162,6 +202,24 @@
   // "Run" lines before the code). Their real wrapper markup hasn't been
   // confirmed via live inspection yet, so no strip selector is guessed
   // here - this is a known, deliberate gap, not an oversight.
+  // Confirmed via live DevTools: a real generated-image turn's <img>
+  // markup includes 3 total <img> elements - 1 real one carrying the
+  // actual alt text, plus 2 aria-hidden="true" decorative duplicates
+  // (a blurred glow-effect layer and a soft-load transition layer) that
+  // exist purely for the page's own visual effect and carry no meaningful
+  // alt text. Left untouched, all 3 would leak into the export. Image
+  // embedding itself is still deferred (see file header) - this only
+  // replaces the real <img> with a plain-text placeholder so the turn
+  // reads cleanly instead of leaving a dead link to a signed, session-
+  // scoped chatgpt.com URL that won't resolve outside the live page.
+  function normalizeImages(clone) {
+    clone.querySelectorAll('img[aria-hidden="true"]').forEach(img => img.remove());
+    clone.querySelectorAll('img').forEach(img => {
+      const alt = img.getAttribute('alt') || 'Generated image';
+      img.replaceWith(document.createTextNode(`[${alt}]`));
+    });
+  }
+
   function normalizeCodeBlocks(clone) {
     clone.querySelectorAll('.cm-content').forEach(cm => {
       const lineEls = cm.querySelectorAll(':scope > .cm-line');
@@ -233,6 +291,7 @@
         clone.querySelectorAll(sel).forEach(n => n.remove());
       });
       normalizeCodeBlocks(clone);
+      normalizeImages(clone);
       const idx = turnIndexFor(el);
       collected.set(key, {
         role,
