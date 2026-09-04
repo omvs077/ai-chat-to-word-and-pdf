@@ -258,3 +258,20 @@ test('every image reference in a multi-image, mixed-format document resolves to 
     assert.ok(entries.includes('word/' + target), `${rid}'s target (${target}) must actually exist in the zip`);
   }
 });
+
+
+// Confirmed via a real generated ChatGPT export: Turndown's real vendored
+// `escapes` array (lib/vendor/turndown.umd.js) backslash-escapes literal
+// Markdown-special characters in plain text - e.g. a bracketed attached
+// filename ChatGPT shows in its own UI ("[photo.jpg]") becomes "\[photo.
+// jpg\]" once Turndown converts the surrounding HTML to Markdown. Nothing
+// downstream removed the backslash, so it rendered as a literal visible
+// character in the real .docx. Checks the actual generated XML bytes, not
+// an intermediate parse, per this project's own testing standard.
+test('escaped Markdown brackets from Turndown do not leak as literal backslashes (regression)', async () => {
+  const buf = await generateFor('Attached: \\[blue-abstract-3840x2160-24765.jpg\\] - what do you think?');
+  const xml = await readDocxEntry(buf, 'word/document.xml');
+  const texts = [...xml.matchAll(/<w:t[^>]*>(.*?)<\/w:t>/g)].map(m => m[1]).join('');
+  assert.ok(texts.includes('[blue-abstract-3840x2160-24765.jpg]'), 'the bracketed filename must render with plain brackets');
+  assert.ok(!texts.includes('\\['), 'no literal backslash-bracket must survive into the real document');
+});

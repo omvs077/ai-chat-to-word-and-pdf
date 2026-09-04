@@ -107,17 +107,16 @@ test('orders turns by the real conversation-turn-N index, not DOM/capture order'
 // normal text turn - tier 1 (the only discovery selector at the time)
 // never saw it. Also confirmed real in the same inspection: 3 total <img>
 // tags (1 real with alt text, 2 aria-hidden="true" decorative duplicates)
-// - trimmed here to the structurally essential subset (dropping the
-// button/SVG action-bar noise below the image, which has no bearing on
-// turn detection or image handling) but every attribute this test actually
-// asserts on is verbatim from the real page.
+// - every element here (including the sr-only heading and the response
+// action bar below the image) is verbatim from the real page, not
+// simplified.
 test('an image-only assistant turn (no data-message-author-role) is not missing from export (regression)', async () => {
   const html = `
     <div id="scrollList" style="overflow-y:auto;height:400px">
       <div data-testid="conversation-turn-21"><div data-message-author-role="user">Generate an image of a lighthouse.</div></div>
       <div data-turn-id-container="request-6a785055-ba14-83ee-a852-1ae87d192985-0">
         <section data-turn-id="request-6a785055-ba14-83ee-a852-1ae87d192985-0" data-testid="conversation-turn-22" data-turn="assistant">
-          <h4 class="sr-only">ChatGPT said:</h4>
+          <h4 class="sr-only select-none">ChatGPT said:</h4>
           <div class="group/imagegen-image relative w-full overflow-hidden" id="image-d73181d2">
             <div class="absolute start-0 end-0 top-0 z-2 w-full">
               <img id="_r_e1_" alt="Generated image: Sunset Lake Dock Retreat" src="https://chatgpt.com/backend-api/estuary/content?id=file_0000000018348211a5976542c396ef99&amp;sig=abc">
@@ -126,6 +125,11 @@ test('an image-only assistant turn (no data-message-author-role) is not missing 
               <img alt="" aria-hidden="true" src="https://chatgpt.com/backend-api/estuary/content?id=file_0000000018348211a5976542c396ef99&amp;sig=abc"></div>
             <div class="absolute inset-0 z-0 scale-110">
               <img alt="" aria-hidden="true" src="https://chatgpt.com/backend-api/estuary/content?id=file_0000000018348211a5976542c396ef99&amp;sig=abc"></div>
+          </div>
+          <div aria-label="Response actions" class="touch:-me-2 -ms-2.5">
+            <button type="button" aria-label="Copy response" data-testid="copy-turn-action-button"><span>ICON</span></button>
+            <button type="button" aria-pressed="false" data-testid="good-image-turn-action-button" aria-label="Like this image"><span>ICON</span></button>
+            <button type="button" aria-pressed="false" aria-label="Edit image">Edit</button>
           </div>
         </section>
       </div>
@@ -141,6 +145,12 @@ test('an image-only assistant turn (no data-message-author-role) is not missing 
   // signed session-scoped URL.
   assert.ok(result.turns[1].html.includes('[Generated image: Sunset Lake Dock Retreat]'));
   assert.equal((result.turns[1].html.match(/<img/g) || []).length, 0, 'no raw <img> tags should remain');
+  // Confirmed real leak from an actual generated export: the sr-only
+  // "ChatGPT said:" label and the "Edit" button text both survived
+  // extraction and rendered as literal noise ("#### ChatGPT said:" and a
+  // stray "Edit" line) around the image placeholder.
+  assert.ok(!result.turns[1].html.includes('ChatGPT said'), 'sr-only "ChatGPT said:" label must not leak');
+  assert.ok(!result.turns[1].html.includes('Edit'), 'the "Edit" action button text must not leak');
 });
 test('a real cited link survives extraction, with its citation-pill chip stripped', async () => {
   const linkParagraph = `<p data-end="712" data-is-last-node="" data-is-only-node="" data-start="39"><strong data-end="93" data-start="39"><a class="decorated-link" data-end="91" data-start="41" href="https://docs.python.org/3/" rel="noopener" target="_new">Python Documentation<span aria-hidden="true" class="ms-0.5 inline-block align-middle leading-none select-none"><svg aria-hidden="true" class="block h-[0.75em] w-[0.75em] stroke-current stroke-[0.75] select-none" data-rtl-flip="" height="20" width="20" xmlns="http://www.w3.org/2000/svg"><use fill="currentColor" href="/cdn/assets/sprites-core-78807d7e.svg#304883"></use></svg></span></a></strong> is the official reference for Python, with tutorials, language references, standard-library documentation, and practical guides. <span class="contents" data-content-reference-end="242" data-content-reference-start="223"><span class="" data-state="closed"><span class="ms-1 inline-flex max-w-full items-center select-none relative top-[-0.094rem] translate-y-0.5 animate-[show_150ms_ease-in]" data-testid="webpage-citation-pill" style="width: 101px;"><a alt="https://docs.python.org/3/?utm_source=chatgpt.com" class="flex h-4.5 overflow-hidden rounded-xl pe-2 ps-1 text-[9px] font-medium transition-colors duration-150 ease-in-out text-token-text-secondary! bg-[#F4F4F4]! dark:bg-[#303030]! select-none" href="https://docs.python.org/3/?utm_source=chatgpt.com" rel="noopener" style="max-width: 101px;" target="_blank"><span class="relative start-0 bottom-0 flex h-full w-full items-center"><span class="flex h-4 w-full items-center justify-between overflow-hidden" style="opacity: 1; transform: none;"><span class="flex min-w-0 flex-1 items-center gap-1"><span class="inline-flex shrink-0 items-center justify-center overflow-hidden rounded-full"><img alt="" class="h-3 w-3 rounded-full" height="128" src="./test chat_files/favicons" width="128"/></span><span class="max-w-[15ch] grow truncate overflow-hidden text-center">Python documentation</span></span></span></span></a></span></span></span> <strong data-end="311" data-start="261"><a class="decorated-link" data-end="309" data-start="263" href="https://developer.mozilla.org/" rel="noopener" target="_new">MDN Web Docs<span aria-hidden="true" class="ms-0.5 inline-block align-middle leading-none select-none"><svg aria-hidden="true" class="block h-[0.75em] w-[0.75em] stroke-current stroke-[0.75] select-none" data-rtl-flip="" height="20" width="20" xmlns="http://www.w3.org/2000/svg"><use fill="currentColor" href="/cdn/assets/sprites-core-78807d7e.svg#304883"></use></svg></span></a></strong> is one of the best resources for learning web development, covering HTML, CSS, JavaScript, Web APIs, and browser technologies. <span class="contents" data-content-reference-end="440" data-content-reference-start="421"><span class="" data-state="closed"><span class="ms-1 inline-flex max-w-full items-center select-none relative top-[-0.094rem] translate-y-0.5 animate-[show_150ms_ease-in]" data-testid="webpage-citation-pill" style="width: 92px;"><a alt="https://developer.mozilla.org/en-US/docs/MDN/index.html?utm_source=chatgpt.com" class="flex h-4.5 overflow-hidden rounded-xl pe-2 ps-1 text-[9px] font-medium transition-colors duration-150 ease-in-out text-token-text-secondary! bg-[#F4F4F4]! dark:bg-[#303030]! select-none" href="https://developer.mozilla.org/en-US/docs/MDN/index.html?utm_source=chatgpt.com" rel="noopener" style="max-width: 92px;" target="_blank"><span class="relative start-0 bottom-0 flex h-full w-full items-center"><span class="flex h-4 w-full items-center justify-between overflow-hidden" style="opacity: 1; transform: none;"><span class="flex min-w-0 flex-1 items-center gap-1"><span class="inline-flex shrink-0 items-center justify-center overflow-hidden rounded-full"><img alt="" class="h-3 w-3 rounded-full" height="128" src="./test chat_files/favicons(1)" width="128"/></span><span class="max-w-[15ch] grow truncate overflow-hidden text-center">MDN Web Docs</span></span></span></span></a></span></span></span> <strong data-end="526" data-start="477"><a class="decorated-link" data-end="524" data-start="479" href="https://www.freecodecamp.org/" rel="noopener" target="_new">freeCodeCamp<span aria-hidden="true" class="ms-0.5 inline-block align-middle leading-none select-none"><svg aria-hidden="true" class="block h-[0.75em] w-[0.75em] stroke-current stroke-[0.75] select-none" data-rtl-flip="" height="20" width="20" xmlns="http://www.w3.org/2000/svg"><use fill="currentColor" href="/cdn/assets/sprites-core-78807d7e.svg#304883"></use></svg></span></a></strong> is a strong choice for hands-on learning, offering interactive programming lessons, projects, and certifications across areas such as Python, JavaScript, web development, and databases.</p>`;

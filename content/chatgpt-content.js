@@ -55,7 +55,21 @@
     // tracking-decorated ?utm_source=chatgpt.com URL). Left unstripped, its
     // favicon <img> and label text leak into the markdown as extra noise
     // immediately after the real link Turndown already converts correctly.
-    '[data-testid="webpage-citation-pill"]'
+    '[data-testid="webpage-citation-pill"]',
+    // Confirmed via live DevTools on a real generated-image turn: a
+    // visually-hidden "ChatGPT said:" <h4 class="sr-only"> label sits
+    // inside every such turn purely for screen readers. Cloning/innerHTML
+    // has no concept of CSS visibility, so it leaked into a real export as
+    // a literal "#### ChatGPT said:" Markdown heading right above the
+    // image placeholder.
+    'h4.sr-only',
+    // Same real turn: the visible response action bar (Copy/Like/Dislike/
+    // Share/Edit/More buttons below the image) - confirmed real via the
+    // same live DevTools capture as aria-label="Response actions". Its
+    // "Edit" button has real visible text content (unlike the icon-only
+    // buttons alongside it), which leaked into the same real export as a
+    // stray "Edit" line.
+    '[aria-label="Response actions"]'
   ];
   const sleep = ms => new Promise(r => setTimeout(r, ms));
   const tried = []; // diagnostic trail for when everything fails
