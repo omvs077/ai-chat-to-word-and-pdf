@@ -63,13 +63,17 @@
     // a literal "#### ChatGPT said:" Markdown heading right above the
     // image placeholder.
     'h4.sr-only',
-    // Same real turn: the visible response action bar (Copy/Like/Dislike/
-    // Share/Edit/More buttons below the image) - confirmed real via the
-    // same live DevTools capture as aria-label="Response actions". Its
-    // "Edit" button has real visible text content (unlike the icon-only
-    // buttons alongside it), which leaked into the same real export as a
-    // stray "Edit" line.
-    '[aria-label="Response actions"]'
+    // CORRECTED after a real re-export still showed a leaked "Edit" line:
+    // the visible response action bar (Copy/Like/Dislike/Share/More
+    // buttons) is icon-only and never leaked text - that part was already
+    // fine. The real "Edit" button lives in a completely different
+    // region: the image's own hover overlay, confirmed via the original
+    // real DevTools capture as data-testid="image-gen-overlay-left-
+    // actions". The previous fix targeted aria-label="Response actions",
+    // which never contained this button at all - a real selector mistake,
+    // not a guess this time, caught by a real re-export showing the bug
+    // still present.
+    '[data-testid="image-gen-overlay-left-actions"]'
   ];
   const sleep = ms => new Promise(r => setTimeout(r, ms));
   const tried = []; // diagnostic trail for when everything fails

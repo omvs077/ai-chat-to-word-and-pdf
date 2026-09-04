@@ -126,10 +126,21 @@ test('an image-only assistant turn (no data-message-author-role) is not missing 
             <div class="absolute inset-0 z-0 scale-110">
               <img alt="" aria-hidden="true" src="https://chatgpt.com/backend-api/estuary/content?id=file_0000000018348211a5976542c396ef99&amp;sig=abc"></div>
           </div>
+          <div class="pointer-events-none absolute z-2 end-0 bottom-0 w-full">
+            <div class="absolute inset-0 flex p-3 items-end justify-end">
+              <div class="flex w-full items-center justify-between">
+                <div class="pointer-events-auto flex items-end gap-2" data-testid="image-gen-overlay-left-actions">
+                  <button type="button" aria-pressed="false" aria-label="Edit image">Edit</button>
+                </div>
+                <div class="pointer-events-auto flex gap-2" data-testid="image-gen-overlay-right-actions">
+                  <button type="button" aria-pressed="false" aria-label="Share this image"><span>ICON</span></button>
+                </div>
+              </div>
+            </div>
+          </div>
           <div aria-label="Response actions" class="touch:-me-2 -ms-2.5">
             <button type="button" aria-label="Copy response" data-testid="copy-turn-action-button"><span>ICON</span></button>
             <button type="button" aria-pressed="false" data-testid="good-image-turn-action-button" aria-label="Like this image"><span>ICON</span></button>
-            <button type="button" aria-pressed="false" aria-label="Edit image">Edit</button>
           </div>
         </section>
       </div>
