@@ -10,6 +10,7 @@ const path = require('path');
 
 const CONTENT_JS_PATH = path.join(__dirname, '..', '..', 'content', 'content.js');
 const CHATGPT_CONTENT_JS_PATH = path.join(__dirname, '..', '..', 'content', 'chatgpt-content.js');
+const GEMINI_CONTENT_JS_PATH = path.join(__dirname, '..', '..', 'content', 'gemini-content.js');
 
 /**
  * @param {string} bodyHtml - HTML to put in <body>. Must include a
@@ -79,4 +80,4 @@ async function runExtraction(bodyHtml, sizes = {}, onReady, scriptPath = CONTENT
   return run(window, window.document, window.location, window.getComputedStyle, window.Node);
 }
 
-module.exports = { runExtraction, CONTENT_JS_PATH, CHATGPT_CONTENT_JS_PATH };
+module.exports = { runExtraction, CONTENT_JS_PATH, CHATGPT_CONTENT_JS_PATH, GEMINI_CONTENT_JS_PATH };

@@ -1,4 +1,4 @@
-﻿(function () {
+(function () {
   const badge = document.getElementById('platformBadge');
   const exportBtn = document.getElementById('exportBtn');
   const statusLine = document.getElementById('statusLine');
@@ -7,7 +7,7 @@
 
   let format = 'docx';
   let activeTabId = null;
-  let detectedPlatform = null; // 'claude' | 'chatgpt' | null
+  let detectedPlatform = null; // 'claude' | 'chatgpt' | 'gemini' | null
 
   segmentedOptions.forEach(btn => {
     btn.addEventListener('click', () => {
@@ -54,12 +54,18 @@
       badge.className = 'badge badge--on';
       exportBtn.disabled = false;
       setStatus('Ready. Click Export to save this conversation.');
+    } else if (hostname === 'gemini.google.com' || hostname.endsWith('.gemini.google.com')) {
+      detectedPlatform = 'gemini';
+      badge.textContent = 'gemini.google.com detected';
+      badge.className = 'badge badge--on';
+      exportBtn.disabled = false;
+      setStatus('Ready. Click Export to save this conversation.');
     } else {
       detectedPlatform = null;
       badge.textContent = 'unsupported page';
       badge.className = 'badge badge--off';
       exportBtn.disabled = true;
-      setStatus('Open a Claude or ChatGPT chat, then click Export.');
+      setStatus('Open a Claude, ChatGPT, or Gemini chat, then click Export.');
     }
   }
 
@@ -106,7 +112,9 @@
       setStep('extract', 'is-active');
       setStatus('Extracting conversation from the page…');
 
-      const contentScriptFile = detectedPlatform === 'chatgpt' ? 'content/chatgpt-content.js' : 'content/content.js';
+      const contentScriptFile = detectedPlatform === 'chatgpt' ? 'content/chatgpt-content.js'
+        : detectedPlatform === 'gemini' ? 'content/gemini-content.js'
+        : 'content/content.js';
       const [{ result }] = await chrome.scripting.executeScript({
         target: { tabId: activeTabId },
         files: [contentScriptFile]
